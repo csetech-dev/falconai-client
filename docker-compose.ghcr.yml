@@ -1,0 +1,125 @@
+# Pull pre-built FalconAI images from GHCR (no source build on client).
+#
+# Requires in .env.app (or shell):
+#   GHCR_IMAGE_PREFIX=ghcr.io/<your-org>/falconai
+#   FALCON_IMAGE_TAG=latest          # or a commit SHA for pinning
+#
+# Usage (application stack):
+#   docker login ghcr.io -u <user> --password-stdin
+#   docker compose --env-file .env.app \
+#     -f docker-compose.app.yml -f docker-compose.ghcr.yml pull
+#   docker compose --env-file .env.app \
+#     -f docker-compose.app.yml -f docker-compose.ghcr.yml up -d --no-build
+#
+# Usage (monolithic stack — deploy-agent on client):
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml \
+#     -f docker-compose.ghcr.yml pull
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml \
+#     -f docker-compose.ghcr.yml up -d --no-build
+
+x-ghcr-image: &ghcr-image
+  pull_policy: always
+
+x-worker-news-image: &worker-news-image
+  <<: *ghcr-image
+  image: ${GHCR_IMAGE_PREFIX:?Set GHCR_IMAGE_PREFIX in .env}/worker-news:${FALCON_IMAGE_TAG:-latest}
+
+services:
+  proxy-rotator:
+    <<: *ghcr-image
+    image: ${GHCR_IMAGE_PREFIX}/proxy-rotator:${FALCON_IMAGE_TAG:-latest}
+
+  falcon-core:
+    <<: *ghcr-image
+    image: ${GHCR_IMAGE_PREFIX}/core-service:${FALCON_IMAGE_TAG:-latest}
+
+  falcon-auth:
+    <<: *ghcr-image
+    image: ${GHCR_IMAGE_PREFIX}/falcon-auth:${FALCON_IMAGE_TAG:-latest}
+
+  falcon-ai-py:
+    <<: *ghcr-image
+    image: ${GHCR_IMAGE_PREFIX}/ai-service:${FALCON_IMAGE_TAG:-latest}
+
+  falcon-analytics:
+    <<: *ghcr-image
+    image: ${GHCR_IMAGE_PREFIX}/falcon-analytics:${FALCON_IMAGE_TAG:-latest}
+
+  search-service:
+    <<: *ghcr-image
+    image: ${GHCR_IMAGE_PREFIX}/search-service:${FALCON_IMAGE_TAG:-latest}
+
+  api-gateway:
+    <<: *ghcr-image
+    image: ${GHCR_IMAGE_PREFIX}/api-gateway:${FALCON_IMAGE_TAG:-latest}
+
+  worker-bot-detection:
+    <<: *ghcr-image
+    image: ${GHCR_IMAGE_PREFIX}/worker-bot-detection:${FALCON_IMAGE_TAG:-latest}
+
+  worker-fb:
+    <<: *ghcr-image
+    image: ${GHCR_IMAGE_PREFIX}/worker-fb:${FALCON_IMAGE_TAG:-latest}
+
+  worker-linkedin:
+    <<: *ghcr-image
+    image: ${GHCR_IMAGE_PREFIX}/worker-linkedin:${FALCON_IMAGE_TAG:-latest}
+
+  worker-news:
+    <<: *worker-news-image
+
+  worker-news-media-1:
+    <<: *worker-news-image
+
+  worker-news-scheduler:
+    <<: *worker-news-image
+
+  worker-news-todays-scheduler:
+    <<: *worker-news-image
+
+  worker-news-trending-scheduler:
+    <<: *worker-news-image
+
+  worker-news-top-scheduler:
+    <<: *worker-news-image
+
+  worker-news-map:
+    <<: *worker-news-image
+
+  worker-news-tv:
+    <<: *worker-news-image
+
+  worker-x:
+    <<: *ghcr-image
+    image: ${GHCR_IMAGE_PREFIX}/worker-x:${FALCON_IMAGE_TAG:-latest}
+
+  worker-telegram:
+    <<: *ghcr-image
+    image: ${GHCR_IMAGE_PREFIX}/worker-telegram:${FALCON_IMAGE_TAG:-latest}
+    # Client bundle has no apps/ tree — load Telegram creds from .env.app instead.
+    env_file: !reset null
+    environment:
+      TELEGRAM_API_ID: ${TELEGRAM_API_ID:-}
+      TELEGRAM_API_HASH: ${TELEGRAM_API_HASH:-}
+      TELEGRAM_PHONE: ${TELEGRAM_PHONE:-}
+      TELEGRAM_PASSWORD: ${TELEGRAM_PASSWORD:-}
+
+  worker-video:
+    <<: *ghcr-image
+    image: ${GHCR_IMAGE_PREFIX}/worker-video:${FALCON_IMAGE_TAG:-latest}
+
+  web-worker:
+    <<: *ghcr-image
+    image: ${GHCR_IMAGE_PREFIX}/web-worker:${FALCON_IMAGE_TAG:-latest}
+
+  worker-image:
+    <<: *ghcr-image
+    image: ${GHCR_IMAGE_PREFIX}/worker-image:${FALCON_IMAGE_TAG:-latest}
+
+  internal-ai:
+    <<: *ghcr-image
+    image: ${GHCR_IMAGE_PREFIX}/internal-ai:${FALCON_IMAGE_TAG:-latest}
+
+  falcon-frontend:
+    <<: *ghcr-image
+    image: ${GHCR_IMAGE_PREFIX}/web:${FALCON_IMAGE_TAG:-latest}

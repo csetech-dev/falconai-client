@@ -1,0 +1,1364 @@
+name: falcon-app
+x-logging:
+  driver: json-file
+  options:
+    max-size: 10m
+    max-file: '3'
+x-healthcheck-defaults:
+  interval: 30s
+  timeout: 10s
+  retries: 3
+  start_period: 40s
+services:
+  opensearch:
+    image: opensearchproject/opensearch:2.12.0
+    container_name: falcon-opensearch
+    restart: unless-stopped
+    environment:
+      discovery.type: single-node
+      bootstrap.memory_lock: 'false'
+      OPENSEARCH_JAVA_OPTS: ${OPENSEARCH_JAVA_OPTS:--Xms512m -Xmx512m}
+      DISABLE_SECURITY_PLUGIN: 'true'
+      indices.query.bool.max_clause_count: 8192
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    ports:
+    - 12050:9200
+    - 12051:9600
+    volumes:
+    - opensearch_data:/usr/share/opensearch/data
+    healthcheck:
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
+      test:
+      - CMD-SHELL
+      - curl -fsS http://localhost:9200/_cluster/health || exit 1
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '2'
+        reservations:
+          memory: 512M
+          cpus: '0.5'
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '3'
+    networks:
+    - falcon-net
+  redis:
+    image: redis:alpine
+    container_name: falcon-redis
+    restart: unless-stopped
+    ports:
+    - 12003:6379
+    volumes:
+    - redis_data:/data
+    healthcheck:
+      test:
+      - CMD
+      - redis-cli
+      - ping
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '1'
+        reservations:
+          memory: 512M
+          cpus: '0.25'
+    command: 'redis-server --maxmemory 512mb --maxmemory-policy noeviction --appendonly
+      yes --appendfsync everysec --tcp-backlog 511 --timeout 0 --tcp-keepalive 300
+
+      '
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '3'
+    networks:
+    - falcon-net
+  proxy-rotator:
+    build:
+      context: ./apps/proxy-rotator
+      dockerfile: Dockerfile
+    container_name: proxy-rotator
+    restart: unless-stopped
+    ports:
+    - 12120:8888
+    environment:
+      PROXY_LIST_FILE: /app/proxies.txt
+      HEALTH_CHECK_URL: https://httpbin.org/ip
+      HEALTH_CHECK_INTERVAL: '300'
+      PROXY_TIMEOUT: '30'
+      MAX_FAILURES: '3'
+      COOLDOWN_SECONDS: '600'
+      ASSIGNMENT_TIMEOUT: '1800'
+      MAX_SHARED: '4'
+      CORE_SERVICE_URL: http://falcon-core:4000
+    healthcheck:
+      test:
+      - CMD
+      - python
+      - -c
+      - import urllib.request; urllib.request.urlopen('http://localhost:8888/health')
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.5'
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '3'
+    networks:
+    - falcon-net
+  adminer:
+    image: adminer
+    restart: always
+    ports:
+    - 12030:8080
+    environment:
+      ADMINER_DEFAULT_SERVER: ${POSTGRES_HOST}
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.5'
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '3'
+    networks:
+    - falcon-net
+  falcon-core:
+    build:
+      context: .
+      dockerfile: apps/core-service/Dockerfile
+    container_name: falcon-core
+    restart: unless-stopped
+    ports:
+    - 12010:4000
+    environment:
+      PORT: 4000
+      AUTH_SERVICE_URL: http://falcon-auth:3001/api/v1/auth
+      NODE_ENV: production
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@${POSTGRES_HOST}:${POSTGRES_PORT:-5432}/falcon_ai?schema=public&connection_limit=${CORE_DB_CONNECTION_LIMIT:-20}&pool_timeout=${CORE_DB_POOL_TIMEOUT:-20}&application_name=${CORE_DB_APP_NAME:-falcon-core}
+      REDIS_HOST: falcon-redis
+      REDIS_PORT: 6379
+      EXTERNAL_AI_API_URL: http://203.190.12.139:8000
+      EXTERNAL_AI_API_KEY: imas-ak-0c13d6d2c818ce16a4c1298b2998a9fb01096e7e48c151bbcd88a6d330640c10
+      VIDEO_AI_API_URL: ${VIDEO_AI_API_URL:-}
+      CORE_API_BASE_URL: ${PUBLIC_GATEWAY_URL}/api/core
+      WEBHOOK_BASE_URL: ${PUBLIC_GATEWAY_URL}/api/core/ai-analysis
+      UV_THREADPOOL_SIZE: 16
+      NODE_OPTIONS: --max-old-space-size=2048
+      MINIO_ENDPOINT: ${MINIO_ENDPOINT}
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-minioadmin}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-minioadmin}
+      MINIO_BUCKET: imas
+      MINIO_USE_SSL: 'false'
+      MINIO_PUBLIC_ENDPOINT: ${MINIO_PUBLIC_ENDPOINT:-localhost:12004}
+      MINIO_PUBLIC_USE_SSL: 'false'
+      MINIO_USE_GATEWAY_URL: 'true'
+      WEB_WORKER_URL: http://web-worker:8000
+      WORKER_X_URL: http://worker-x:3013
+      WORKER_NEWS_SCHEDULE_URL: http://worker-news-scheduler:3012
+      WORKER_NEWS_POOL_URLS: http://worker-news-media-1:3012
+      WORKER_NEWS_TODAYS_SCHEDULE_URL: http://worker-news-todays-scheduler:3012
+      WORKER_NEWS_TRENDING_SCHEDULE_URL: http://worker-news-trending-scheduler:3012
+      WORKER_NEWS_TOP_SCHEDULE_URL: http://worker-news-top-scheduler:3012
+      WORKER_NEWS_MAP_URL: http://worker-news-map:3012
+      WORKER_NEWS_TV_URL: http://worker-news-tv:3012
+      BOT_DETECTION_WORKER_URL: http://worker-bot-detection:3016
+      WORKER_API_PASSWORD: ${WORKER_API_PASSWORD:-85234569495721}
+      DEPLOY_PROJECT_DIR: /opt/FalconAI
+      YT_MIN_VIDEO_DURATION_MINUTES: 20
+      YT_CAMPAIGN_VIDEO_FORMAT: mp4
+      YT_CAMPAIGN_VIDEO_CHUNK: 'false'
+      YT_CAMPAIGN_VIDEO_CHUNK_SECONDS: 30
+      ENABLE_SOCIAL_VIRAL_PIPELINE: 'true'
+      ENABLE_SOCIAL_AUTO_SCHEDULE: 'true'
+      FIRST_SNAPSHOT_DELAY_MINUTES: 60
+      SECOND_SNAPSHOT_DELAY_MINUTES: 120
+      THIRD_SNAPSHOT_DELAY_MINUTES: 180
+      AUTO_SCHEDULE_INTERVAL_MINUTES: 240
+      MIN_ENGAGEMENT_RATE: 3
+      MIN_REACTION_RPM: 20
+      MIN_COMMENT_RPM: 0
+      MIN_SHARE_RPM: 0
+      BAD_POST_RETENTION_DAYS: 60
+      MAX_SNAPSHOT_ATTEMPTS: 3
+      SOCIAL_SCRAPER_CONCURRENCY: ${SOCIAL_SCRAPER_CONCURRENCY:-10}
+    depends_on:
+      redis:
+        condition: service_started
+    volumes:
+    - /var/run/docker.sock:/var/run/docker.sock
+    - /opt/FalconAI:/opt/FalconAI
+    - /home/fawz/.gitconfig:/root/.gitconfig:ro
+    - /home/fawz/.git-credentials:/root/.git-credentials:ro
+    healthcheck:
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+      test:
+      - CMD
+      - curl
+      - -f
+      - http://localhost:4000/api/v1/health
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '2'
+        reservations:
+          memory: 256M
+          cpus: '0.5'
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '3'
+    networks:
+    - falcon-net
+  falcon-auth:
+    build:
+      context: ./apps/falcon-auth
+      dockerfile: Dockerfile
+    container_name: falcon-auth
+    restart: unless-stopped
+    ports:
+    - 12012:3001
+    environment:
+      DATABASE_HOST: ${POSTGRES_HOST}
+      DATABASE_PORT: ${POSTGRES_PORT:-5432}
+      DATABASE_USER: ${POSTGRES_USER:-postgres}
+      DATABASE_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      DATABASE_NAME: falcon_ai
+      DATABASE_POOL_MAX: ${AUTH_DB_POOL_MAX:-10}
+      DATABASE_POOL_IDLE_MS: ${AUTH_DB_POOL_IDLE_MS:-30000}
+      DATABASE_APPLICATION_NAME: ${AUTH_DB_APP_NAME:-falcon-auth}
+      JWT_SECRET: falcon-ai-jwt-secret
+      JWT_EXPIRATION: 24h
+      JWT_REFRESH_SECRET: falcon-ai-refresh-secret
+      JWT_REFRESH_EXPIRATION: 7d
+      PORT: 3001
+      NODE_ENV: production
+      NODE_OPTIONS: --max-old-space-size=512
+    healthcheck:
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+      test:
+      - CMD
+      - node
+      - -e
+      - 'require(''http'').get(''http://localhost:3001/api/v1/health'', (r) => process.exit(r.statusCode
+        === 200 ? 0 : 1))'
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '1'
+        reservations:
+          memory: 128M
+          cpus: '0.25'
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '3'
+    networks:
+    - falcon-net
+  falcon-ai-py:
+    build:
+      context: ./apps/ai-service
+      dockerfile: Dockerfile
+    container_name: falcon-ai-service
+    restart: unless-stopped
+    ports:
+    - 12020:5000
+    environment:
+      PORT: 5000
+      ANALYZER_TYPE: mock
+      CORS_ORIGINS: http://localhost:12001,http://localhost:12010
+      UVICORN_WORKERS: 4
+      OMP_NUM_THREADS: 4
+      MKL_NUM_THREADS: 4
+      TOKENIZERS_PARALLELISM: 'true'
+      PROXY_ROTATOR_URL: http://proxy-rotator:8888
+      PROXY_ENABLED: 'true'
+    healthcheck:
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+      test:
+      - CMD
+      - curl
+      - -f
+      - http://localhost:5000/health
+    deploy:
+      resources:
+        limits:
+          memory: 10G
+          cpus: '4'
+        reservations:
+          memory: 2G
+          cpus: '2'
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '3'
+    networks:
+    - falcon-net
+  falcon-analytics:
+    build:
+      context: .
+      dockerfile: ./apps/falcon-analytics/Dockerfile
+    container_name: falcon-analytics
+    restart: unless-stopped
+    ports:
+    - 12025:4005
+    environment:
+      PORT: 4005
+      NODE_ENV: production
+      NODE_OPTIONS: --max-old-space-size=512
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@${POSTGRES_HOST}:${POSTGRES_PORT:-5432}/falcon_ai?schema=public&connection_limit=${ANALYTICS_DB_CONNECTION_LIMIT:-10}&pool_timeout=${ANALYTICS_DB_POOL_TIMEOUT:-20}&application_name=${ANALYTICS_DB_APP_NAME:-falcon-analytics}
+    healthcheck:
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+      test:
+      - CMD
+      - curl
+      - -f
+      - http://localhost:4005/health
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '1'
+        reservations:
+          memory: 128M
+          cpus: '0.25'
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '3'
+    networks:
+    - falcon-net
+  search-service:
+    build:
+      context: ./apps/search-service
+      dockerfile: Dockerfile
+    container_name: falcon-search
+    restart: unless-stopped
+    ports:
+    - 12055:4000
+    environment:
+      WORKER_API_PASSWORD: ${WORKER_API_PASSWORD:-85234569495721}
+      SEARCH_STARTUP_SEED: ${SEARCH_STARTUP_SEED:-false}
+      SEARCH_SYNC_ON_START: ${SEARCH_SYNC_ON_START:-false}
+    depends_on:
+      opensearch:
+        condition: service_started
+    healthcheck:
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 90s
+      test:
+      - CMD
+      - curl
+      - -f
+      - http://localhost:4000/api/v1/health
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '1'
+        reservations:
+          memory: 128M
+          cpus: '0.25'
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '3'
+    networks:
+      falcon-net:
+        aliases:
+        - falcon-search
+        - search-service
+  api-gateway:
+    build:
+      context: ./apps/api-gateway
+      dockerfile: Dockerfile
+    container_name: falcon-api-gateway
+    restart: unless-stopped
+    ports:
+    - 12006:80
+    environment:
+      MINIO_API_UPSTREAM: ${MINIO_ENDPOINT:-falcon-minio:9000}
+      MINIO_CONSOLE_UPSTREAM: ${MINIO_CONSOLE_ENDPOINT:-falcon-minio:9001}
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '1'
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '3'
+    networks:
+    - falcon-net
+  worker-bot-detection:
+    build:
+      context: ./apps/scrapers/worker-bot-detection
+      dockerfile: Dockerfile
+    container_name: worker-bot-detection
+    restart: unless-stopped
+    environment:
+      PORT: 3016
+      WORKERS: 2
+      WORKER_API_PASSWORD: ${WORKER_API_PASSWORD:-85234569495721}
+      LOG_LEVEL: INFO
+    healthcheck:
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+      test:
+      - CMD
+      - python
+      - -c
+      - import urllib.request; urllib.request.urlopen('http://localhost:3016/health')
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '2'
+        reservations:
+          memory: 256M
+          cpus: '0.5'
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '3'
+    networks:
+    - falcon-net
+  worker-fb:
+    build:
+      context: ./apps/scrapers/worker-fb
+      dockerfile: Dockerfile
+    container_name: worker-fb
+    restart: unless-stopped
+    ports:
+    - 12040:3010
+    environment:
+      PORT: 3010
+      DISPLAY: :99
+      HEADLESS: 'false'
+      FB_VNC_PROFILE_DIR: /app/facebook_vnc_profile
+      FB_VIEWER_URL: http://localhost:12045/viewer
+      FB_RAW_NOVNC_URL: http://localhost:12045/vnc/vnc.html?autoconnect=1&resize=scale&path=vnc/websockify
+      REDIS_HOST: falcon-redis
+      REDIS_PORT: 6379
+      NODE_ENV: production
+      NODE_OPTIONS: --max-old-space-size=512
+      MINIO_ENDPOINT: ${MINIO_ENDPOINT}
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-minioadmin}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-minioadmin}
+      MINIO_BUCKET: imas
+      MINIO_USE_SSL: 'false'
+      MINIO_PUBLIC_ENDPOINT: ${MINIO_PUBLIC_ENDPOINT:-localhost:12004}
+      MINIO_PUBLIC_USE_SSL: 'false'
+      FB_MULTI_ACCOUNT_ENABLED: ${FB_MULTI_ACCOUNT_ENABLED:-true}
+      CORE_SERVICE_URL: http://falcon-core:4000
+      WORKER_API_PASSWORD: ${WORKER_API_PASSWORD:-85234569495721}
+      FB_LANE_PLATFORM: FACEBOOK
+      FB_METRICS_BROWSERLESS: ${FB_METRICS_BROWSERLESS:-true}
+      FB_LANE_NOVNC_URL_TEMPLATE: ${FB_LANE_NOVNC_URL_TEMPLATE:-/viewer/facebook/lane/{port}/vnc.html?autoconnect=1&resize=scale&path=viewer/facebook/lane/{port}/websockify}
+    command:
+    - sh
+    - -lc
+    - 'mkdir -p /app/facebook_vnc_profile; Xvfb :99 -screen 0 1920x1080x24 -ac >/tmp/xvfb.log
+      2>&1 & while [ ! -S /tmp/.X11-unix/X99 ]; do sleep 0.2; done; export DISPLAY=:99;
+      if command -v xset >/dev/null 2>&1; then xset s off -dpms s noblank; fi; openbox
+      >/tmp/openbox.log 2>&1 & x11vnc -display :99 -forever -shared -nopw -noxdamage
+      -xkb -repeat -listen 0.0.0.0 -rfbport 5900 >/tmp/x11vnc.log 2>&1 & websockify
+      --web=/usr/share/novnc/ 7900 localhost:5900 >/tmp/websockify.log 2>&1 & if command
+      -v xset >/dev/null 2>&1; then (while true; do DISPLAY=:99 xset s off -dpms s
+      noblank >/dev/null 2>&1; sleep 30; done) & fi; python api.py
+
+      '
+    shm_size: 4gb
+    volumes:
+    - ./apps/scrapers/worker-fb/cookies.json:/app/cookies.json
+    - ./apps/scrapers/worker-fb/facebook_vnc_profile:/app/facebook_vnc_profile
+    - ./apps/scrapers/worker-fb/lanes:/app/lanes
+    depends_on:
+      redis:
+        condition: service_started
+    healthcheck:
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+      test:
+      - CMD
+      - curl
+      - -f
+      - http://localhost:3010/health
+    deploy:
+      resources:
+        limits:
+          memory: 22G
+          cpus: '12'
+        reservations:
+          memory: 4G
+          cpus: '4'
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '3'
+    networks:
+    - falcon-net
+  worker-linkedin:
+    build:
+      context: ./apps/scrapers/worker-linkedin
+      dockerfile: Dockerfile
+    container_name: worker-linkedin
+    restart: unless-stopped
+    ports:
+    - 12112:3011
+    environment:
+      PORT: 3011
+      DISPLAY: :99
+      LINKEDIN_CHROME_PROFILE_DIR: /app/linkedin_chrome_profile
+      LINKEDIN_VNC_URL: http://localhost:12060/viewer
+      PROXY_ROTATOR_URL: http://proxy-rotator:8888
+      PROXY_ENABLED: 'true'
+      LINKEDIN_RAW_NOVNC_URL: http://localhost:12060/vnc/vnc.html?autoconnect=1&resize=scale&path=vnc/websockify
+      REDIS_HOST: falcon-redis
+      REDIS_PORT: 6379
+      NODE_ENV: production
+      NODE_OPTIONS: --max-old-space-size=512
+    shm_size: 4gb
+    mem_limit: 2g
+    cpus: '2.0'
+    volumes:
+    - ./apps/scrapers/worker-linkedin/linkedin_chrome_profile:/app/linkedin_chrome_profile
+    - ./apps/scrapers/worker-linkedin/cookies.json:/app/cookies.json
+    depends_on:
+      redis:
+        condition: service_started
+    healthcheck:
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+      test:
+      - CMD
+      - curl
+      - -f
+      - http://localhost:3011/
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '2'
+        reservations:
+          memory: 512M
+          cpus: '0.5'
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '3'
+    networks:
+    - falcon-net
+  worker-news:
+    build:
+      context: ./apps/scrapers/worker-news
+      dockerfile: Dockerfile
+    container_name: worker-news
+    restart: unless-stopped
+    ports:
+    - 12080:3012
+    environment:
+      PORT: 3012
+      REDIS_HOST: falcon-redis
+      REDIS_PORT: 6379
+      NODE_ENV: production
+      NODE_OPTIONS: --max-old-space-size=512
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@${POSTGRES_HOST}:${POSTGRES_PORT:-5432}/falcon_ai?schema=public
+      WORKERS: 2
+      THREADS: 2
+      SOURCE_WORKERS: 2
+      GUNICORN_TIMEOUT: 0
+      GUNICORN_GRACEFUL_TIMEOUT: 30
+      GUNICORN_MAX_REQUESTS: 300
+      GUNICORN_MAX_REQUESTS_JITTER: 30
+      NEWS_SCROLL_REFRESH_INTERVAL_SECONDS: 15
+      PROXY_ROTATOR_URL: http://proxy-rotator:8888
+      PROXY_ENABLED: 'true'
+    shm_size: 4gb
+    volumes:
+    - worker_news_outputs:/app/outputs
+    - ./apps/scrapers/worker-news/outputs:/app/outputs-host
+    depends_on:
+      redis:
+        condition: service_started
+    healthcheck:
+      test:
+      - CMD
+      - curl
+      - -fsS
+      - http://localhost:3012/healthz
+      interval: 30s
+      timeout: 30s
+      retries: 10
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 8G
+          cpus: '8'
+        reservations:
+          memory: 4G
+          cpus: '4'
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '3'
+    networks:
+    - falcon-net
+  worker-news-media-1:
+    build:
+      context: ./apps/scrapers/worker-news
+      dockerfile: Dockerfile
+    container_name: worker-news-media-1
+    restart: unless-stopped
+    environment:
+      PORT: 3012
+      REDIS_HOST: falcon-redis
+      REDIS_PORT: 6379
+      NODE_ENV: production
+      NODE_OPTIONS: --max-old-space-size=512
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@${POSTGRES_HOST}:${POSTGRES_PORT:-5432}/falcon_ai?schema=public
+      WORKERS: 2
+      THREADS: 2
+      SOURCE_WORKERS: 2
+      GUNICORN_TIMEOUT: 0
+      GUNICORN_GRACEFUL_TIMEOUT: 30
+      GUNICORN_MAX_REQUESTS: 300
+      GUNICORN_MAX_REQUESTS_JITTER: 30
+      NEWS_SCROLL_REFRESH_INTERVAL_SECONDS: 15
+    shm_size: 4gb
+    volumes:
+    - worker_news_outputs:/app/outputs
+    - ./apps/scrapers/worker-news/outputs:/app/outputs-host
+    depends_on:
+      redis:
+        condition: service_started
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+          cpus: '4'
+        reservations:
+          memory: 1G
+          cpus: '1'
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '3'
+    networks:
+    - falcon-net
+  worker-news-scheduler:
+    build:
+      context: ./apps/scrapers/worker-news
+      dockerfile: Dockerfile
+    container_name: worker-news-scheduler
+    restart: unless-stopped
+    environment:
+      PORT: 3012
+      REDIS_HOST: falcon-redis
+      REDIS_PORT: 6379
+      NODE_ENV: production
+      NODE_OPTIONS: --max-old-space-size=512
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@${POSTGRES_HOST}:${POSTGRES_PORT:-5432}/falcon_ai?schema=public
+      WORKERS: 1
+      THREADS: 2
+      SOURCE_WORKERS: 1
+      GUNICORN_TIMEOUT: 0
+      GUNICORN_GRACEFUL_TIMEOUT: 30
+      GUNICORN_MAX_REQUESTS: 300
+      GUNICORN_MAX_REQUESTS_JITTER: 30
+      NEWS_SCROLL_REFRESH_INTERVAL_SECONDS: 15
+    shm_size: 4gb
+    volumes:
+    - worker_news_outputs:/app/outputs
+    - ./apps/scrapers/worker-news/outputs:/app/outputs-host
+    depends_on:
+      redis:
+        condition: service_started
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '1'
+        reservations:
+          memory: 512M
+          cpus: '0.25'
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '3'
+    networks:
+    - falcon-net
+  worker-news-todays-scheduler:
+    build:
+      context: ./apps/scrapers/worker-news
+      dockerfile: Dockerfile
+    container_name: worker-news-todays-scheduler
+    restart: unless-stopped
+    environment:
+      PORT: 3012
+      REDIS_HOST: falcon-redis
+      REDIS_PORT: 6379
+      NODE_ENV: production
+      NODE_OPTIONS: --max-old-space-size=512
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@${POSTGRES_HOST}:${POSTGRES_PORT:-5432}/falcon_ai?schema=public
+      WORKERS: 2
+      THREADS: 2
+      SOURCE_WORKERS: 1
+      GUNICORN_TIMEOUT: 0
+      GUNICORN_GRACEFUL_TIMEOUT: 30
+      GUNICORN_MAX_REQUESTS: 300
+      GUNICORN_MAX_REQUESTS_JITTER: 30
+      NEWS_SCROLL_REFRESH_INTERVAL_SECONDS: 15
+    shm_size: 4gb
+    volumes:
+    - worker_news_outputs:/app/outputs
+    - ./apps/scrapers/worker-news/outputs:/app/outputs-host
+    depends_on:
+      redis:
+        condition: service_started
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '1'
+        reservations:
+          memory: 512M
+          cpus: '0.25'
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '3'
+    networks:
+    - falcon-net
+  worker-news-trending-scheduler:
+    build:
+      context: ./apps/scrapers/worker-news
+      dockerfile: Dockerfile
+    container_name: worker-news-trending-scheduler
+    restart: unless-stopped
+    environment:
+      PORT: 3012
+      REDIS_HOST: falcon-redis
+      REDIS_PORT: 6379
+      NODE_ENV: production
+      NODE_OPTIONS: --max-old-space-size=512
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@${POSTGRES_HOST}:${POSTGRES_PORT:-5432}/falcon_ai?schema=public
+      WORKERS: 2
+      THREADS: 2
+      SOURCE_WORKERS: 1
+      GUNICORN_TIMEOUT: 0
+      GUNICORN_GRACEFUL_TIMEOUT: 30
+      GUNICORN_MAX_REQUESTS: 300
+      GUNICORN_MAX_REQUESTS_JITTER: 30
+      NEWS_SCROLL_REFRESH_INTERVAL_SECONDS: 15
+    shm_size: 4gb
+    volumes:
+    - worker_news_outputs:/app/outputs
+    - ./apps/scrapers/worker-news/outputs:/app/outputs-host
+    depends_on:
+      redis:
+        condition: service_started
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '1'
+        reservations:
+          memory: 512M
+          cpus: '0.25'
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '3'
+    networks:
+    - falcon-net
+  worker-news-top-scheduler:
+    build:
+      context: ./apps/scrapers/worker-news
+      dockerfile: Dockerfile
+    container_name: worker-news-top-scheduler
+    restart: unless-stopped
+    environment:
+      PORT: 3012
+      REDIS_HOST: falcon-redis
+      REDIS_PORT: 6379
+      NODE_ENV: production
+      NODE_OPTIONS: --max-old-space-size=512
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@${POSTGRES_HOST}:${POSTGRES_PORT:-5432}/falcon_ai?schema=public
+      WORKERS: 2
+      THREADS: 2
+      SOURCE_WORKERS: 1
+      GUNICORN_TIMEOUT: 0
+      GUNICORN_GRACEFUL_TIMEOUT: 30
+      GUNICORN_MAX_REQUESTS: 300
+      GUNICORN_MAX_REQUESTS_JITTER: 30
+      NEWS_SCROLL_REFRESH_INTERVAL_SECONDS: 15
+    shm_size: 4gb
+    volumes:
+    - worker_news_outputs:/app/outputs
+    - ./apps/scrapers/worker-news/outputs:/app/outputs-host
+    depends_on:
+      redis:
+        condition: service_started
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '1'
+        reservations:
+          memory: 512M
+          cpus: '0.25'
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '3'
+    networks:
+    - falcon-net
+  worker-news-map:
+    build:
+      context: ./apps/scrapers/worker-news
+      dockerfile: Dockerfile
+    container_name: worker-news-map
+    restart: unless-stopped
+    environment:
+      PORT: 3012
+      REDIS_HOST: falcon-redis
+      REDIS_PORT: 6379
+      NODE_ENV: production
+      NODE_OPTIONS: --max-old-space-size=512
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@${POSTGRES_HOST}:${POSTGRES_PORT:-5432}/falcon_ai?schema=public
+      WORKERS: 1
+      THREADS: 2
+      SOURCE_WORKERS: 1
+      GUNICORN_TIMEOUT: 0
+      GUNICORN_GRACEFUL_TIMEOUT: 30
+      GUNICORN_MAX_REQUESTS: 300
+      GUNICORN_MAX_REQUESTS_JITTER: 30
+      NEWS_SCROLL_REFRESH_INTERVAL_SECONDS: 15
+    shm_size: 4gb
+    volumes:
+    - worker_news_outputs:/app/outputs
+    - ./apps/scrapers/worker-news/outputs:/app/outputs-host
+    depends_on:
+      redis:
+        condition: service_started
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '1'
+        reservations:
+          memory: 512M
+          cpus: '0.25'
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '3'
+    networks:
+    - falcon-net
+  worker-news-tv:
+    build:
+      context: ./apps/scrapers/worker-news
+      dockerfile: Dockerfile
+    container_name: worker-news-tv
+    restart: unless-stopped
+    environment:
+      PORT: 3012
+      REDIS_HOST: falcon-redis
+      REDIS_PORT: 6379
+      NODE_ENV: production
+      NODE_OPTIONS: --max-old-space-size=512
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@${POSTGRES_HOST}:${POSTGRES_PORT:-5432}/falcon_ai?schema=public
+      WORKERS: 1
+      THREADS: 2
+      SOURCE_WORKERS: 1
+      GUNICORN_TIMEOUT: 0
+      GUNICORN_GRACEFUL_TIMEOUT: 30
+      GUNICORN_MAX_REQUESTS: 300
+      GUNICORN_MAX_REQUESTS_JITTER: 30
+      NEWS_SCROLL_REFRESH_INTERVAL_SECONDS: 15
+    shm_size: 4gb
+    volumes:
+    - worker_news_outputs:/app/outputs
+    - ./apps/scrapers/worker-news/outputs:/app/outputs-host
+    depends_on:
+      redis:
+        condition: service_started
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '1'
+        reservations:
+          memory: 512M
+          cpus: '0.25'
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '3'
+    networks:
+    - falcon-net
+  worker-x:
+    build:
+      context: ./apps/scrapers/worker-x
+      dockerfile: Dockerfile
+    container_name: worker-x
+    restart: unless-stopped
+    ports:
+    - 12113:3013
+    environment:
+      PORT: 3013
+      DISPLAY: :99
+      X_PROFILE_DIR: /app/x_chrome_profile
+      X_VNC_URL: http://localhost:12085/viewer
+      X_RAW_NOVNC_URL: http://localhost:12085/vnc/vnc.html?autoconnect=1&resize=scale&path=vnc/websockify
+      REDIS_HOST: falcon-redis
+      REDIS_PORT: 6379
+      NODE_ENV: production
+      NODE_OPTIONS: --max-old-space-size=512
+      PROXY_ROTATOR_URL: http://proxy-rotator:8888
+      PROXY_ENABLED: 'true'
+    command:
+    - sh
+    - -lc
+    - 'mkdir -p /app/x_chrome_profile && chown -R root:root /app/x_chrome_profile;
+      Xvfb :99 -screen 0 1920x1080x24 -ac >/tmp/xvfb.log 2>&1 & while [ ! -S /tmp/.X11-unix/X99
+      ]; do sleep 0.2; done; export DISPLAY=:99; openbox --config-file /app/openbox-rc.xml
+      >/tmp/openbox.log 2>&1 & x11vnc -display :99 -forever -shared -nopw -listen
+      0.0.0.0 -rfbport 5900 >/tmp/x11vnc.log 2>&1 & websockify --web=/usr/share/novnc/
+      7900 localhost:5900 >/tmp/websockify.log 2>&1 & python app.py
+
+      '
+    shm_size: 4gb
+    volumes:
+    - ./apps/scrapers/worker-x/x_chrome_profile:/app/x_chrome_profile
+    depends_on:
+      redis:
+        condition: service_started
+    healthcheck:
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+      test:
+      - CMD
+      - curl
+      - -f
+      - http://localhost:3013/
+    deploy:
+      resources:
+        limits:
+          memory: 8192M
+          cpus: '4'
+        reservations:
+          memory: 2048M
+          cpus: '2'
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '3'
+    networks:
+    - falcon-net
+  worker-telegram:
+    build:
+      context: ./apps/scrapers/worker-telegram
+      dockerfile: Dockerfile
+    container_name: worker-telegram
+    restart: unless-stopped
+    ports:
+    - 12090:3014
+    env_file:
+    - ./apps/scrapers/worker-telegram/.env
+    environment:
+      PORT: 3014
+      HOST: 0.0.0.0
+      DEBUG: 'false'
+      PYTHONUNBUFFERED: 1
+      REDIS_HOST: falcon-redis
+      REDIS_PORT: 6379
+      TELEGRAM_SESSION_DIR: /app/sessions
+      PROXY_ROTATOR_URL: http://proxy-rotator:8888
+      PROXY_ENABLED: 'true'
+    shm_size: 2gb
+    volumes:
+    - telegram_sessions:/app/sessions
+    depends_on:
+      redis:
+        condition: service_started
+    healthcheck:
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+      test:
+      - CMD
+      - python
+      - -c
+      - import urllib.request; urllib.request.urlopen('http://localhost:3014/health')
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '1'
+        reservations:
+          memory: 128M
+          cpus: '0.25'
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '3'
+    networks:
+    - falcon-net
+  worker-video:
+    build:
+      context: ./apps/scrapers/worker-video
+      dockerfile: Dockerfile
+    container_name: worker-video
+    restart: unless-stopped
+    ports:
+    - 12101:3016
+    environment:
+      PORT: 3016
+      HOST: 0.0.0.0
+      DEBUG: 'false'
+      WORKERS: 4
+      PYTHONUNBUFFERED: 1
+      LOG_LEVEL: INFO
+      REDIS_HOST: falcon-redis
+      REDIS_PORT: 6379
+      DOWNLOAD_DIR: /app/downloads
+      MAX_VIDEO_DURATION_SECONDS: 3600
+      MAX_FILE_SIZE_MB: 500
+      MINIO_ENDPOINT: ${MINIO_ENDPOINT}
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-minioadmin}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-minioadmin}
+      MINIO_BUCKET: imas
+      MINIO_USE_SSL: 'false'
+      VIDEO_QUEUE_NAME: video-jobs
+      WORKER_CONCURRENCY: 4
+      GUNICORN_WORKERS: 4
+      YT_API_KEY: ${YT_API_KEY:-}
+      PROXY_ROTATOR_URL: http://proxy-rotator:8888
+      PROXY_ENABLED: 'true'
+    shm_size: 2gb
+    volumes:
+    - video_downloads:/app/downloads
+    - ./apps/scrapers/worker-video/cookies.txt:/app/cookies.txt:rw
+    tmpfs:
+    - /app/downloads/tmp:size=5g,mode=1777
+    depends_on:
+      redis:
+        condition: service_started
+    healthcheck:
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+      test:
+      - CMD
+      - python
+      - -c
+      - import urllib.request; urllib.request.urlopen('http://localhost:3016/health')
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '2'
+        reservations:
+          memory: 512M
+          cpus: '0.5'
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '3'
+    networks:
+    - falcon-net
+  web-worker:
+    build:
+      context: ./apps/web-worker
+      dockerfile: Dockerfile
+    container_name: web-worker
+    restart: unless-stopped
+    environment:
+      PYTHONUNBUFFERED: 1
+      DISPLAY: :99
+      WEB_WORKER_PROFILE_DIR: /app/.chrome-profile
+      WEB_WORKER_VIEWER_URL: http://localhost:12110/viewer
+      WEB_WORKER_RAW_NOVNC_URL: http://localhost:12110/vnc/vnc.html?autoconnect=1&resize=scale&path=vnc/websockify
+      TOOLS_CLICK_TIMEOUT: 0.8
+      TOOLS_STEP_PAUSE: 0.05
+      TOOLS_APPLY_PAUSE: 0.3
+    command:
+    - sh
+    - -lc
+    - 'mkdir -p /app/.chrome-profile && chown -R root:root /app/.chrome-profile; Xvfb
+      :99 -screen 0 1920x1080x24 -ac >/tmp/xvfb.log 2>&1 & while [ ! -S /tmp/.X11-unix/X99
+      ]; do sleep 0.2; done; export DISPLAY=:99; openbox --config-file /app/openbox-rc.xml
+      >/tmp/openbox.log 2>&1 & x11vnc -display :99 -forever -shared -nopw -listen
+      0.0.0.0 -rfbport 5900 >/tmp/x11vnc.log 2>&1 & websockify --web=/usr/share/novnc/
+      7900 localhost:5900 >/tmp/websockify.log 2>&1 & uvicorn api:app --host 0.0.0.0
+      --port 8000
+
+      '
+    volumes:
+    - ./apps/web-worker/.chrome-profile:/app/.chrome-profile
+    - ./apps/web-worker/outputs:/app/outputs
+    shm_size: 4gb
+    healthcheck:
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+      test:
+      - CMD
+      - python
+      - -c
+      - import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')
+    deploy:
+      resources:
+        limits:
+          memory: 12G
+          cpus: '6'
+        reservations:
+          memory: 1G
+          cpus: '2'
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '3'
+    networks:
+    - falcon-net
+  worker-image:
+    build:
+      context: ./apps/scrapers/worker-image
+      dockerfile: Dockerfile
+    container_name: worker-image
+    restart: unless-stopped
+    environment:
+      PYTHONUNBUFFERED: 1
+      DISPLAY: :99
+      IMAGE_WORKER_PROFILE_DIR: /app/image_chrome_profile
+      IMAGE_WORKER_VIEWER_URL: http://localhost:12095/viewer
+      IMAGE_WORKER_RAW_NOVNC_URL: http://localhost:12095/vnc/vnc.html?autoconnect=1&resize=scale&path=vnc/websockify
+    command:
+    - sh
+    - -lc
+    - 'mkdir -p /app/image_chrome_profile && chown -R root:root /app/image_chrome_profile;
+      rm -f /tmp/.X99-lock /tmp/.X11-unix/X99; Xvfb :99 -screen 0 1920x1080x24 -ac
+      >/tmp/xvfb.log 2>&1 & while [ ! -S /tmp/.X11-unix/X99 ]; do sleep 0.2; done;
+      export DISPLAY=:99; openbox --config-file /app/openbox-rc.xml >/tmp/openbox.log
+      2>&1 & x11vnc -display :99 -forever -shared -nopw -listen 0.0.0.0 -rfbport 5900
+      >/tmp/x11vnc.log 2>&1 & websockify --web=/usr/share/novnc/ 7900 localhost:5900
+      >/tmp/websockify.log 2>&1 & uvicorn api:app --host 0.0.0.0 --port 3015
+
+      '
+    volumes:
+    - ./apps/scrapers/worker-image/image_chrome_profile:/app/image_chrome_profile
+    shm_size: 4gb
+    healthcheck:
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+      test:
+      - CMD
+      - python
+      - -c
+      - import urllib.request; urllib.request.urlopen('http://127.0.0.1:3015/health')
+    deploy:
+      resources:
+        limits:
+          memory: 8G
+          cpus: '4'
+        reservations:
+          memory: 1G
+          cpus: '2'
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '3'
+    networks:
+    - falcon-net
+  internal-ai:
+    build:
+      context: ./apps/internal-ai
+      dockerfile: Dockerfile
+    container_name: internal-ai
+    restart: unless-stopped
+    environment:
+      PYTHONUNBUFFERED: 1
+      DISPLAY: :99
+      INTERNAL_AI_PROFILE_DIR: /app/internal-ai-profile
+      INTERNAL_AI_VIEWER_URL: ${PUBLIC_GATEWAY_URL:-http://localhost:12006}/viewer/internal-ai/vnc/vnc.html?autoconnect=1&resize=scale&path=viewer/internal-ai/vnc/websockify
+      INTERNAL_AI_RAW_NOVNC_URL: ${PUBLIC_GATEWAY_URL:-http://localhost:12006}/viewer/internal-ai/vnc/vnc.html?autoconnect=1&resize=scale&path=viewer/internal-ai/vnc/websockify
+      PROXY_ROTATOR_URL: http://proxy-rotator:8888
+      PROXY_ENABLED: 'true'
+    command:
+    - sh
+    - -lc
+    - 'mkdir -p /app/internal-ai-profile && chown -R root:root /app/internal-ai-profile;
+      Xvfb :99 -screen 0 1920x1080x24 -ac >/tmp/xvfb.log 2>&1 & while [ ! -S /tmp/.X11-unix/X99
+      ]; do sleep 0.2; done; export DISPLAY=:99; openbox --config-file /app/openbox-rc.xml
+      >/tmp/openbox.log 2>&1 & x11vnc -display :99 -forever -shared -nopw -listen
+      0.0.0.0 -rfbport 5900 >/tmp/x11vnc.log 2>&1 & websockify --web=/usr/share/novnc/
+      7900 localhost:5900 >/tmp/websockify.log 2>&1 & uvicorn api:app --host 0.0.0.0
+      --port 8000
+
+      '
+    volumes:
+    - ./apps/internal-ai/internal-ai-profile:/app/internal-ai-profile
+    shm_size: 4gb
+    healthcheck:
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+      test:
+      - CMD
+      - python
+      - -c
+      - import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+          cpus: '2'
+        reservations:
+          memory: 512M
+          cpus: '0.5'
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '3'
+    networks:
+    - falcon-net
+  scraper-viewer-proxy:
+    image: nginx:alpine
+    container_name: scraper-viewer-proxy
+    restart: unless-stopped
+    ports:
+    - 12045:12045
+    - 12060:12060
+    - 12085:12085
+    - 12095:12095
+    - 12110:12110
+    volumes:
+    - ./infra/nginx/scraper-viewer-proxy.conf:/etc/nginx/nginx.conf:ro
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '3'
+    networks:
+    - falcon-net
+  falcon-frontend:
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+    container_name: falcon-frontend
+    restart: unless-stopped
+    ports:
+    - 12001:80
+    healthcheck:
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+      test:
+      - CMD
+      - wget
+      - --spider
+      - -q
+      - http://127.0.0.1:80
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.5'
+        reservations:
+          memory: 64M
+          cpus: '0.1'
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '3'
+    networks:
+    - falcon-net
+volumes:
+  telegram_sessions: null
+  worker_news_outputs: null
+  redis_data: null
+  opensearch_data: null
+  video_downloads: null
+networks:
+  falcon-net:
+    driver: bridge
