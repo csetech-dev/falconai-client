@@ -62,25 +62,23 @@ require_running_core() {
   fi
 }
 
-compose_db_args() {
+build_compose_db_args() {
   detect_compose
   [[ -f "${ENV_FILE}" ]] || die "Missing ${ENV_FILE}. Run: make init-app"
   load_env_file "${ENV_FILE}"
 
-  local args=(--env-file "${ENV_FILE}" -f "${APP_COMPOSE}")
+  COMPOSE_DB_ARGS=(--env-file "${ENV_FILE}" -f "${APP_COMPOSE}")
   if [[ "${FALCON_DEPLOY_MODE:-}" == "ghcr" ]] || [[ -n "${GHCR_IMAGE_PREFIX:-}" ]]; then
-    args+=(-f "${ROOT_DIR}/docker-compose.ghcr.yml")
+    COMPOSE_DB_ARGS+=(-f "${ROOT_DIR}/docker-compose.ghcr.yml")
   fi
-  printf '%s\n' "${args[@]}"
 }
 
 run_in_core() {
   local shell_cmd="$1"
-  local -a compose_args
-  mapfile -t compose_args < <(compose_db_args)
+  build_compose_db_args
 
   log "One-off falcon-core container (DATABASE_URL from .env.app)..."
-  "${COMPOSE[@]}" "${compose_args[@]}" run --rm --no-deps falcon-core \
+  "${COMPOSE[@]}" "${COMPOSE_DB_ARGS[@]}" run --rm --no-deps falcon-core \
     sh -lc "${shell_cmd}"
 }
 
