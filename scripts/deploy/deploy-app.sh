@@ -64,10 +64,10 @@ fi
 log "Starting application stack..."
 "${COMPOSE[@]}" "${UP_ARGS[@]}"
 
-if [[ "${USE_GHCR}" == "1" ]] && docker ps --format '{{.Names}}' | grep -qx falcon-core; then
-  log "Applying Prisma schema from image..."
-  docker exec -w /app/libs/database falcon-core npx prisma db push --skip-generate || \
-    warn "prisma db push failed — check falcon-core logs."
+if [[ "${USE_GHCR}" == "1" ]]; then
+  log "Applying Prisma schema (one-off container)..."
+  bash "${SCRIPT_DIR}/db.sh" push || \
+    warn "prisma db push failed — check DATABASE_URL in .env.app and falcon-core logs."
 fi
 
 if [[ "${BUILD_FLAG}" == "1" ]]; then

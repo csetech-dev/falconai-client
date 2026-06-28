@@ -1,0 +1,22 @@
+[Unit]
+Description=FalconAI Deploy Agent (GHCR client)
+Documentation=https://github.com/falconai/falconai/blob/main/docs/GHCR_DEPLOY.md
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/falconai-client
+ExecStart=/opt/falconai-client/scripts/deploy-agent.sh
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=falcon-deploy-agent
+Environment=FALCON_PROJECT_DIR=/opt/falconai-client
+Environment=FALCON_DEPLOY_DIR=/opt/falconai-client
+Environment=FALCON_DEPLOY_MODE=ghcr
+
+[Install]
+WantedBy=multi-user.target

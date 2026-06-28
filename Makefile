@@ -24,7 +24,7 @@ help:
 	@echo "    make db-push          schema update, keep data (db push --skip-generate)"
 	@echo "    make db-push-loss     schema update, allow data loss (--accept-data-loss)"
 	@echo "    make db-generate      prisma generate"
-	@echo "    make db-seed          run seed.ts"
+	@echo "    make db-seed          run full database seed flow"
 	@echo "    make db-status        migration status"
 	@echo "    make db-psql          list tables"
 	@echo ""
@@ -33,7 +33,7 @@ help:
 	@echo "    make db-exec-push     db push --skip-generate via docker exec"
 	@echo "    make db-exec-push-loss  db push --accept-data-loss via docker exec"
 	@echo "    make db-exec-generate prisma generate via docker exec"
-	@echo "    make db-exec-seed     seed via docker exec"
+	@echo "    make db-exec-seed     run full database seed flow via docker exec"
 
 init-storage:
 	bash scripts/deploy/deploy.sh init-storage

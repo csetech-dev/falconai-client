@@ -1,0 +1,22 @@
+[Unit]
+Description=FalconAI GHCR deploy webhook
+Documentation=https://github.com/falconai/falconai/blob/main/docs/GHCR_DEPLOY.md
+After=network.target falcon-deploy-agent.service
+Wants=falcon-deploy-agent.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/falconai-client
+Environment=FALCON_DEPLOY_DIR=/opt/falconai-client
+Environment=GHCR_WEBHOOK_PORT=9191
+EnvironmentFile=-/etc/falconai/ghcr-webhook.env
+ExecStart=/usr/bin/python3 /opt/falconai-client/scripts/deploy/ghcr-webhook-server.py
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=falcon-ghcr-webhook
+
+[Install]
+WantedBy=multi-user.target

@@ -27,9 +27,10 @@ One-off container (falcon-core does NOT need to be running; uses .env.app):
   push              prisma db push --skip-generate              (prefer no data loss)
   push-loss         prisma db push --skip-generate --accept-data-loss
   generate          prisma generate
-  seed              ts-node prisma/seed.ts
+  seed              full seed flow (seed.ts + prompts + news sources + news status filter + news media groups + geo)
   seed-prompts      npm run seed:prompts
   seed-news-sources npm run seed:news-sources
+  seed-news-status  npm run seed:news-status-filter
   seed-news-media   npm run seed:news-media-groups
   seed-geo          tsx prisma/seed-geo.ts
   migrate           prisma migrate deploy
@@ -41,7 +42,7 @@ Running falcon-core container (classic docker exec approach):
   exec push         docker exec … prisma db push --skip-generate
   exec push-loss    docker exec … prisma db push --skip-generate --accept-data-loss
   exec generate     docker exec … prisma generate
-  exec seed         docker exec … ts-node prisma/seed.ts
+  exec seed         docker exec … full seed flow
   exec migrate      docker exec … prisma migrate deploy
   exec status       docker exec … prisma migrate status
   exec <cmd>        docker exec … sh -lc "<cmd>"  (advanced)
@@ -62,23 +63,25 @@ require_running_core() {
   fi
 }
 
-build_compose_db_args() {
+compose_db_args() {
   detect_compose
   [[ -f "${ENV_FILE}" ]] || die "Missing ${ENV_FILE}. Run: make init-app"
   load_env_file "${ENV_FILE}"
 
-  COMPOSE_DB_ARGS=(--env-file "${ENV_FILE}" -f "${APP_COMPOSE}")
+  local args=(--env-file "${ENV_FILE}" -f "${APP_COMPOSE}")
   if [[ "${FALCON_DEPLOY_MODE:-}" == "ghcr" ]] || [[ -n "${GHCR_IMAGE_PREFIX:-}" ]]; then
-    COMPOSE_DB_ARGS+=(-f "${ROOT_DIR}/docker-compose.ghcr.yml")
+    args+=(-f "${ROOT_DIR}/docker-compose.ghcr.yml")
   fi
+  printf '%s\n' "${args[@]}"
 }
 
 run_in_core() {
   local shell_cmd="$1"
-  build_compose_db_args
+  local -a compose_args
+  mapfile -t compose_args < <(compose_db_args)
 
   log "One-off falcon-core container (DATABASE_URL from .env.app)..."
-  "${COMPOSE[@]}" "${COMPOSE_DB_ARGS[@]}" run --rm --no-deps falcon-core \
+  "${COMPOSE[@]}" "${compose_args[@]}" run --rm --no-deps falcon-core \
     sh -lc "${shell_cmd}"
 }
 
@@ -139,13 +142,16 @@ run_db_action() {
       shell_cmd="cd ${DB_DIR} && npx prisma generate"
       ;;
     seed)
-      shell_cmd="cd ${DB_DIR} && npx ts-node prisma/seed.ts"
+      shell_cmd="cd ${DB_DIR} && npm run seed:all"
       ;;
     seed-prompts)
       shell_cmd="cd ${DB_DIR} && npm run seed:prompts"
       ;;
     seed-news-sources)
       shell_cmd="cd ${DB_DIR} && npm run seed:news-sources"
+      ;;
+    seed-news-status)
+      shell_cmd="cd ${DB_DIR} && npm run seed:news-status-filter"
       ;;
     seed-news-media)
       shell_cmd="cd ${DB_DIR} && npm run seed:news-media-groups"
@@ -186,7 +192,7 @@ main() {
     generate)
       run_db_action oneoff generate
       ;;
-    seed|seed-prompts|seed-news-sources|seed-news-media|seed-geo)
+    seed|seed-prompts|seed-news-sources|seed-news-status|seed-news-media|seed-geo)
       run_db_action oneoff "${command}"
       ;;
     migrate)
@@ -209,11 +215,11 @@ main() {
           warn "exec push-loss may drop columns/tables — backup first if unsure."
           run_db_action exec push 1
           ;;
-        generate|seed|seed-prompts|seed-news-sources|seed-news-media|seed-geo|migrate|status)
+        generate|seed|seed-prompts|seed-news-sources|seed-news-status|seed-news-media|seed-geo|migrate|status)
           run_db_action exec "${sub}"
           ;;
         "")
-          die "Usage: db.sh exec <push|push-loss|generate|seed|migrate|status|...>"
+          die "Usage: db.sh exec <push|push-loss|generate|seed|seed-prompts|seed-news-sources|seed-news-status|seed-news-media|seed-geo|migrate|status|...>"
           ;;
         *)
           run_in_running_core "$*"
