@@ -23,6 +23,19 @@ WEBHOOK_UNIT="/etc/systemd/system/falcon-ghcr-webhook.service"
 log() { printf '[setup-auto-deploy] %s\n' "$*"; }
 die() { printf '[setup-auto-deploy] ERROR: %s\n' "$*" >&2; exit 1; }
 
+# install(1) fails when src and dest are the same path (common on client bundle hosts).
+install_file() {
+  local src="$1" dest="$2" mode="$3"
+  [[ -f "${src}" ]] || die "Missing file: ${src}"
+  mkdir -p "$(dirname "${dest}")"
+  if [[ -f "${dest}" ]] && [[ "$(readlink -f "${src}")" == "$(readlink -f "${dest}")" ]]; then
+    chmod "${mode}" "${dest}"
+    log "Already in place: ${dest}"
+    return 0
+  fi
+  install -m "${mode}" "${src}" "${dest}"
+}
+
 [[ "$(id -u)" -eq 0 ]] || die "Run as root: sudo bash $0"
 
 command -v python3 >/dev/null 2>&1 || die "python3 is required for the webhook receiver"
@@ -34,10 +47,10 @@ command -v docker >/dev/null 2>&1 || die "docker is required"
 
 mkdir -p "${ENV_DIR}" "${DEPLOY_DIR}/.deploy" "${DEPLOY_DIR}/scripts"
 
-install -m 755 "${ROOT_DIR}/scripts/deploy-agent.sh" "${DEPLOY_DIR}/scripts/deploy-agent.sh"
-install -m 755 "${ROOT_DIR}/scripts/deploy/ghcr-webhook-server.py" "${DEPLOY_DIR}/scripts/deploy/ghcr-webhook-server.py"
-install -m 644 "${SCRIPT_DIR}/falcon-deploy-agent.service" "${AGENT_UNIT}"
-install -m 644 "${SCRIPT_DIR}/ghcr-webhook.service" "${WEBHOOK_UNIT}"
+install_file "${ROOT_DIR}/scripts/deploy-agent.sh" "${DEPLOY_DIR}/scripts/deploy-agent.sh" 755
+install_file "${ROOT_DIR}/scripts/deploy/ghcr-webhook-server.py" "${DEPLOY_DIR}/scripts/deploy/ghcr-webhook-server.py" 755
+install_file "${SCRIPT_DIR}/falcon-deploy-agent.service" "${AGENT_UNIT}" 644
+install_file "${SCRIPT_DIR}/ghcr-webhook.service" "${WEBHOOK_UNIT}" 644
 
 if [[ ! -f "${ENV_FILE}" ]]; then
   secret="$(openssl rand -hex 32 2>/dev/null || python3 -c 'import secrets; print(secrets.token_hex(32))')"
