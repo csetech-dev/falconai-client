@@ -33,6 +33,9 @@ fi
 
 [[ -n "${GHCR_IMAGE_PREFIX:-}" ]] || die "GHCR_IMAGE_PREFIX is not set (e.g. ghcr.io/your-org/falconai)"
 
+export FALCON_DEPLOY_DIR="${FALCON_DEPLOY_DIR:-${ROOT_DIR}}"
+bash "${SCRIPT_DIR}/init-client-data.sh"
+
 if ! docker info >/dev/null 2>&1; then
   die "Docker daemon is not reachable."
 fi

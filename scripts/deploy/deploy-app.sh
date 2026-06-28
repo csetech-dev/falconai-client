@@ -48,6 +48,8 @@ if [[ "${USE_GHCR}" == "1" ]]; then
 fi
 
 if [[ "${USE_GHCR}" == "1" ]]; then
+  export FALCON_DEPLOY_DIR="${FALCON_DEPLOY_DIR:-${ROOT_DIR}}"
+  bash "${SCRIPT_DIR}/init-client-data.sh"
   log "GHCR mode: pulling ${GHCR_IMAGE_PREFIX} (tag: ${FALCON_IMAGE_TAG:-latest})..."
   "${COMPOSE[@]}" "${COMPOSE_ARGS[@]}" pull
 fi

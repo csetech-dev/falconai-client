@@ -32,6 +32,12 @@ services:
   falcon-core:
     <<: *ghcr-image
     image: ${GHCR_IMAGE_PREFIX}/core-service:${FALCON_IMAGE_TAG:-latest}
+    environment:
+      DEPLOY_PROJECT_DIR: ${FALCON_DEPLOY_DIR:-/opt/falconai-client}
+    volumes: !reset null
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${FALCON_DEPLOY_DIR:-.}:/opt/FalconAI
 
   falcon-auth:
     <<: *ghcr-image
@@ -123,3 +129,8 @@ services:
   falcon-frontend:
     <<: *ghcr-image
     image: ${GHCR_IMAGE_PREFIX}/web:${FALCON_IMAGE_TAG:-latest}
+
+  scraper-viewer-proxy:
+    volumes: !reset null
+    volumes:
+      - ./infra/nginx/scraper-viewer-proxy.conf:/etc/nginx/nginx.conf:ro
