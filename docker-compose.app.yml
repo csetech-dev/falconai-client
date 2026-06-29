@@ -157,6 +157,7 @@ services:
       PORT: 4000
       AUTH_SERVICE_URL: http://falcon-auth:3001/api/v1/auth
       NODE_ENV: production
+      JWT_SECRET: ${JWT_SECRET:-falcon-ai-jwt-secret}
       DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@${POSTGRES_HOST}:${POSTGRES_PORT:-5432}/falcon_ai?schema=public&connection_limit=${CORE_DB_CONNECTION_LIMIT:-20}&pool_timeout=${CORE_DB_POOL_TIMEOUT:-20}&application_name=${CORE_DB_APP_NAME:-falcon-core}
       REDIS_HOST: falcon-redis
       REDIS_PORT: 6379
@@ -254,9 +255,9 @@ services:
       DATABASE_POOL_MAX: ${AUTH_DB_POOL_MAX:-10}
       DATABASE_POOL_IDLE_MS: ${AUTH_DB_POOL_IDLE_MS:-30000}
       DATABASE_APPLICATION_NAME: ${AUTH_DB_APP_NAME:-falcon-auth}
-      JWT_SECRET: falcon-ai-jwt-secret
+      JWT_SECRET: ${JWT_SECRET:-falcon-ai-jwt-secret}
       JWT_EXPIRATION: 24h
-      JWT_REFRESH_SECRET: falcon-ai-refresh-secret
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:-falcon-ai-refresh-secret}
       JWT_REFRESH_EXPIRATION: 7d
       PORT: 3001
       NODE_ENV: production

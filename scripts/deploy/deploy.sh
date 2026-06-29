@@ -87,7 +87,15 @@ cmd_down() {
 
   if [[ "${target}" == "app" || "${target}" == "all" ]] && [[ -f "${ROOT_DIR}/.env.app" ]]; then
     log "Stopping application stack..."
-    "${COMPOSE[@]}" --env-file "${ROOT_DIR}/.env.app" -f "${APP_COMPOSE}" down
+    local -a app_args=(--env-file "${ROOT_DIR}/.env.app" -f "${APP_COMPOSE}")
+    set -a
+    # shellcheck disable=SC1090
+    source "${ROOT_DIR}/.env.app"
+    set +a
+    if [[ "${FALCON_DEPLOY_MODE:-}" == "ghcr" ]] || [[ -n "${GHCR_IMAGE_PREFIX:-}" ]]; then
+      app_args+=(-f "${ROOT_DIR}/docker-compose.ghcr.yml")
+    fi
+    "${COMPOSE[@]}" "${app_args[@]}" down
   fi
 
   if [[ "${target}" == "storage" || "${target}" == "all" ]] && [[ -f "${ROOT_DIR}/.env.storage" ]]; then
