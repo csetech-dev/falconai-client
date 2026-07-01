@@ -1,4 +1,4 @@
-.PHONY: init-storage init-app deploy-storage deploy-app deploy-ghcr deploy-status deploy-down fix-crlf logs-app logs-storage \
+.PHONY: init-storage init-app deploy-storage deploy-app deploy-ghcr deploy-status deploy-down fix-crlf clean-docker logs-app logs-storage \
 	db-push db-push-loss db-generate db-seed db-status db-psql \
 	db-exec-push db-exec-push-loss db-exec-generate db-exec-seed db-copy-schema help
 
@@ -17,6 +17,7 @@ help:
 	@echo ""
 	@echo "  make deploy-status    Show running services"
 	@echo "  make deploy-down      Stop stacks"
+	@echo "  make clean-docker     Prune unused Docker images/build cache (reclaim disk)"
 	@echo "  make logs-app         Follow application logs"
 	@echo "  make logs-storage     Follow storage logs"
 	@echo ""
@@ -58,6 +59,9 @@ deploy-status:
 
 deploy-down:
 	bash scripts/deploy/deploy.sh down all
+
+clean-docker:
+	bash scripts/deploy/clean-docker.sh
 
 logs-app:
 	bash scripts/deploy/deploy.sh logs app $(SERVICE)

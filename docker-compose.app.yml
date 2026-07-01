@@ -436,6 +436,7 @@ services:
     networks:
     - falcon-net
   worker-bot-detection:
+    profiles: ["scrapers"]
     build:
       context: ./apps/scrapers/worker-bot-detection
       dockerfile: Dockerfile
@@ -472,6 +473,7 @@ services:
     networks:
     - falcon-net
   worker-fb:
+    profiles: ["scrapers"]
     build:
       context: ./apps/scrapers/worker-fb
       dockerfile: Dockerfile
@@ -513,7 +515,7 @@ services:
       -xkb -repeat -listen 0.0.0.0 -rfbport 5900 >/tmp/x11vnc.log 2>&1 & websockify
       --web=/usr/share/novnc/ 7900 localhost:5900 >/tmp/websockify.log 2>&1 & if command
       -v xset >/dev/null 2>&1; then (while true; do DISPLAY=:99 xset s off -dpms s
-      noblank >/dev/null 2>&1; sleep 30; done) & fi; python api.py
+      noblank >/dev/null 2>&1; sleep 30; done) & fi; run-py api
 
       '
     shm_size: 4gb
@@ -550,6 +552,7 @@ services:
     networks:
     - falcon-net
   worker-linkedin:
+    profiles: ["scrapers"]
     build:
       context: ./apps/scrapers/worker-linkedin
       dockerfile: Dockerfile
@@ -604,6 +607,7 @@ services:
     networks:
     - falcon-net
   worker-news:
+    profiles: ["scrapers"]
     build:
       context: ./apps/scrapers/worker-news
       dockerfile: Dockerfile
@@ -661,6 +665,7 @@ services:
     networks:
     - falcon-net
   worker-news-media-1:
+    profiles: ["scrapers"]
     build:
       context: ./apps/scrapers/worker-news
       dockerfile: Dockerfile
@@ -704,6 +709,7 @@ services:
     networks:
     - falcon-net
   worker-news-scheduler:
+    profiles: ["scrapers"]
     build:
       context: ./apps/scrapers/worker-news
       dockerfile: Dockerfile
@@ -747,6 +753,7 @@ services:
     networks:
     - falcon-net
   worker-news-todays-scheduler:
+    profiles: ["scrapers"]
     build:
       context: ./apps/scrapers/worker-news
       dockerfile: Dockerfile
@@ -790,6 +797,7 @@ services:
     networks:
     - falcon-net
   worker-news-trending-scheduler:
+    profiles: ["scrapers"]
     build:
       context: ./apps/scrapers/worker-news
       dockerfile: Dockerfile
@@ -833,6 +841,7 @@ services:
     networks:
     - falcon-net
   worker-news-top-scheduler:
+    profiles: ["scrapers"]
     build:
       context: ./apps/scrapers/worker-news
       dockerfile: Dockerfile
@@ -876,6 +885,7 @@ services:
     networks:
     - falcon-net
   worker-news-map:
+    profiles: ["scrapers"]
     build:
       context: ./apps/scrapers/worker-news
       dockerfile: Dockerfile
@@ -919,6 +929,7 @@ services:
     networks:
     - falcon-net
   worker-news-tv:
+    profiles: ["scrapers"]
     build:
       context: ./apps/scrapers/worker-news
       dockerfile: Dockerfile
@@ -962,6 +973,7 @@ services:
     networks:
     - falcon-net
   worker-x:
+    profiles: ["scrapers"]
     build:
       context: ./apps/scrapers/worker-x
       dockerfile: Dockerfile
@@ -989,7 +1001,7 @@ services:
       ]; do sleep 0.2; done; export DISPLAY=:99; openbox --config-file /app/openbox-rc.xml
       >/tmp/openbox.log 2>&1 & x11vnc -display :99 -forever -shared -nopw -listen
       0.0.0.0 -rfbport 5900 >/tmp/x11vnc.log 2>&1 & websockify --web=/usr/share/novnc/
-      7900 localhost:5900 >/tmp/websockify.log 2>&1 & python app.py
+      7900 localhost:5900 >/tmp/websockify.log 2>&1 & run-py app
 
       '
     shm_size: 4gb
@@ -1024,6 +1036,7 @@ services:
     networks:
     - falcon-net
   worker-telegram:
+    profiles: ["scrapers"]
     build:
       context: ./apps/scrapers/worker-telegram
       dockerfile: Dockerfile
@@ -1075,6 +1088,7 @@ services:
     networks:
     - falcon-net
   worker-video:
+    profiles: ["scrapers"]
     build:
       context: ./apps/scrapers/worker-video
       dockerfile: Dockerfile
@@ -1140,6 +1154,7 @@ services:
     networks:
     - falcon-net
   web-worker:
+    profiles: ["scrapers"]
     build:
       context: ./apps/web-worker
       dockerfile: Dockerfile
@@ -1196,6 +1211,7 @@ services:
     networks:
     - falcon-net
   worker-image:
+    profiles: ["scrapers"]
     build:
       context: ./apps/scrapers/worker-image
       dockerfile: Dockerfile
@@ -1248,6 +1264,7 @@ services:
     networks:
     - falcon-net
   internal-ai:
+    profiles: ["scrapers"]
     build:
       context: ./apps/internal-ai
       dockerfile: Dockerfile
@@ -1302,6 +1319,7 @@ services:
     networks:
     - falcon-net
   scraper-viewer-proxy:
+    profiles: ["scrapers"]
     image: nginx:alpine
     container_name: scraper-viewer-proxy
     restart: unless-stopped

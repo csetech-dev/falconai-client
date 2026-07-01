@@ -65,6 +65,8 @@ services:
   worker-fb:
     <<: *ghcr-image
     image: ${GHCR_IMAGE_PREFIX}/worker-fb:${FALCON_IMAGE_TAG:-latest}
+    # Use image CMD (Xvfb + run-py api). Avoids stale bundle overrides like `python api.py`.
+    command: !reset null
 
   worker-linkedin:
     <<: *ghcr-image
