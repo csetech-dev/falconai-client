@@ -114,13 +114,6 @@ services:
   worker-telegram:
     <<: *ghcr-image
     image: ${GHCR_IMAGE_PREFIX}/worker-telegram:${FALCON_IMAGE_TAG:-latest}
-    # Client bundle has no apps/ tree — load Telegram creds from .env.app instead.
-    env_file: !reset null
-    environment:
-      TELEGRAM_API_ID: ${TELEGRAM_API_ID:-}
-      TELEGRAM_API_HASH: ${TELEGRAM_API_HASH:-}
-      TELEGRAM_PHONE: ${TELEGRAM_PHONE:-}
-      TELEGRAM_PASSWORD: ${TELEGRAM_PASSWORD:-}
 
   worker-video:
     <<: *ghcr-image

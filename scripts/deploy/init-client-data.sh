@@ -65,6 +65,16 @@ ensure_dir  "${ROOT_DIR}/apps/scrapers/worker-linkedin/linkedin_chrome_profile"
 ensure_dir  "${ROOT_DIR}/apps/scrapers/worker-news/outputs"
 ensure_dir  "${ROOT_DIR}/apps/scrapers/worker-x/x_chrome_profile"
 ensure_file "${ROOT_DIR}/apps/scrapers/worker-video/cookies.txt"
+TG_ENV="${ROOT_DIR}/apps/scrapers/worker-telegram/.env"
+TG_EXAMPLE="${ROOT_DIR}/apps/scrapers/worker-telegram/.env.example"
+if [[ ! -f "${TG_ENV}" ]]; then
+  if [[ -f "${TG_EXAMPLE}" ]]; then
+    cp "${TG_EXAMPLE}" "${TG_ENV}"
+    log "Created ${TG_ENV} from .env.example"
+  else
+    ensure_file "${TG_ENV}"
+  fi
+fi
 ensure_dir  "${ROOT_DIR}/apps/web-worker/.chrome-profile"
 ensure_dir  "${ROOT_DIR}/apps/web-worker/outputs"
 ensure_dir  "${ROOT_DIR}/apps/scrapers/worker-image/image_chrome_profile"

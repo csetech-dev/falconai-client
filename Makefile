@@ -1,6 +1,6 @@
 .PHONY: init-storage init-app deploy-storage deploy-app deploy-ghcr deploy-status deploy-down fix-crlf fix-worker-entrypoints verify-scrapers clean-docker logs-app logs-storage \
-	db-push db-push-loss db-generate db-seed db-status db-psql \
-	db-exec-push db-exec-push-loss db-exec-generate db-exec-seed db-copy-schema help
+	db-push db-push-loss db-generate db-seed db-seed-videos db-status db-psql \
+	db-exec-push db-exec-push-loss db-exec-generate db-exec-seed db-exec-seed-videos db-copy-schema help
 
 help:
 	@echo "FalconAI split deployment (any host — pick the stack you need)"
@@ -28,6 +28,7 @@ help:
 	@echo "    make db-push-loss     schema update, allow data loss (--accept-data-loss)"
 	@echo "    make db-generate      prisma generate"
 	@echo "    make db-seed          run full database seed flow"
+	@echo "    make db-seed-videos   seed demo video intelligence data"
 	@echo "    make db-status        migration status"
 	@echo "    make db-psql          list tables"
 	@echo ""
@@ -37,6 +38,7 @@ help:
 	@echo "    make db-exec-push-loss  db push --accept-data-loss via docker exec"
 	@echo "    make db-exec-generate prisma generate via docker exec"
 	@echo "    make db-exec-seed     run full database seed flow via docker exec"
+	@echo "    make db-exec-seed-videos  seed demo videos via docker exec"
 
 init-storage:
 	bash scripts/deploy/deploy.sh init-storage
@@ -89,6 +91,9 @@ db-generate:
 db-seed:
 	bash scripts/deploy/db.sh seed
 
+db-seed-videos:
+	bash scripts/deploy/db.sh seed-videos
+
 db-status:
 	bash scripts/deploy/db.sh status
 
@@ -109,3 +114,6 @@ db-exec-generate:
 
 db-exec-seed:
 	bash scripts/deploy/db.sh exec seed
+
+db-exec-seed-videos:
+	bash scripts/deploy/db.sh exec seed-videos

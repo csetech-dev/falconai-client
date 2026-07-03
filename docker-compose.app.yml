@@ -1050,8 +1050,6 @@ services:
     restart: unless-stopped
     ports:
     - 12090:3014
-    env_file:
-    - ./apps/scrapers/worker-telegram/.env
     environment:
       PORT: 3014
       HOST: 0.0.0.0
@@ -1060,6 +1058,10 @@ services:
       REDIS_HOST: falcon-redis
       REDIS_PORT: 6379
       TELEGRAM_SESSION_DIR: /app/sessions
+      TELEGRAM_API_ID: ${TELEGRAM_API_ID:-}
+      TELEGRAM_API_HASH: ${TELEGRAM_API_HASH:-}
+      TELEGRAM_PHONE: ${TELEGRAM_PHONE:-}
+      TELEGRAM_PASSWORD: ${TELEGRAM_PASSWORD:-}
       PROXY_ROTATOR_URL: http://proxy-rotator:8888
       PROXY_ENABLED: 'true'
     shm_size: 2gb

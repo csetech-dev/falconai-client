@@ -33,6 +33,7 @@ One-off container (falcon-core does NOT need to be running; uses .env.app):
   seed-news-status  npm run seed:news-status-filter
   seed-news-media   npm run seed:news-media-groups
   seed-geo          tsx prisma/seed-geo.ts
+  seed-videos       demo video intelligence data (1 talk show + 1 general)
   migrate           prisma migrate deploy
   status            prisma migrate status
   psql              psql client (args after --)
@@ -159,6 +160,9 @@ run_db_action() {
     seed-geo)
       shell_cmd="cd ${DB_DIR} && npx ts-node prisma/seed-geo.ts"
       ;;
+    seed-videos)
+      shell_cmd="cd ${DB_DIR} && npm run seed:videos"
+      ;;
     migrate)
       shell_cmd="cd ${DB_DIR} && npx prisma migrate deploy"
       ;;
@@ -192,7 +196,7 @@ main() {
     generate)
       run_db_action oneoff generate
       ;;
-    seed|seed-prompts|seed-news-sources|seed-news-status|seed-news-media|seed-geo)
+    seed|seed-prompts|seed-news-sources|seed-news-status|seed-news-media|seed-geo|seed-videos)
       run_db_action oneoff "${command}"
       ;;
     migrate)
@@ -215,11 +219,11 @@ main() {
           warn "exec push-loss may drop columns/tables — backup first if unsure."
           run_db_action exec push 1
           ;;
-        generate|seed|seed-prompts|seed-news-sources|seed-news-status|seed-news-media|seed-geo|migrate|status)
+        generate|seed|seed-prompts|seed-news-sources|seed-news-status|seed-news-media|seed-geo|seed-videos|migrate|status)
           run_db_action exec "${sub}"
           ;;
         "")
-          die "Usage: db.sh exec <push|push-loss|generate|seed|seed-prompts|seed-news-sources|seed-news-status|seed-news-media|seed-geo|migrate|status|...>"
+          die "Usage: db.sh exec <push|push-loss|generate|seed|seed-prompts|seed-news-sources|seed-news-status|seed-news-media|seed-geo|seed-videos|migrate|status|...>"
           ;;
         *)
           run_in_running_core "$*"
