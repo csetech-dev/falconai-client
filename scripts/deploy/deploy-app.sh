@@ -10,18 +10,37 @@ ENV_FILE="${ROOT_DIR}/.env.app"
 ENV_EXAMPLE="${ROOT_DIR}/.env.app.example"
 BUILD_FLAG="${BUILD_FLAG:-1}"
 
+# GHCR bytecode Python workers — recreate after deploy so run-py entrypoints apply.
+readonly GHCR_BYTECODE_WORKERS=(
+  worker-fb
+  worker-x
+  worker-linkedin
+  web-worker
+  internal-ai
+)
+
 require_cmd docker
 require_cmd curl
 detect_compose
 
 cd "${ROOT_DIR}"
 ensure_env_file "${ENV_EXAMPLE}" "${ENV_FILE}" "application environment" "make init-app"
+
+USE_GHCR=0
+if [[ "${FALCON_DEPLOY_MODE:-}" == "ghcr" ]] || [[ -n "${GHCR_IMAGE_PREFIX:-}" ]]; then
+  USE_GHCR=1
+fi
+
+if [[ "${USE_GHCR}" == "1" ]]; then
+  bash "${SCRIPT_DIR}/ensure-scrapers-profile.sh"
+fi
+
 load_env_file "${ENV_FILE}"
 resolve_storage_host
 
 if [[ -z "${COMPOSE_PROFILES:-}" ]] || [[ "${COMPOSE_PROFILES}" != *scrapers* ]]; then
   warn "COMPOSE_PROFILES does not include 'scrapers' — worker-news, worker-fb, worker-linkedin, etc. will NOT start."
-  warn "Add COMPOSE_PROFILES=scrapers to .env.app, then run: make deploy-ghcr"
+  warn "Run: bash scripts/deploy/ensure-scrapers-profile.sh && make deploy-ghcr"
 fi
 
 [[ -n "${POSTGRES_HOST:-}" ]] || die "POSTGRES_HOST or STORAGE_SERVER_IP must be set in .env.app"
@@ -41,9 +60,7 @@ log "Preflight: checking remote storage connectivity..."
 wait_for_tcp "${POSTGRES_HOST}" "${POSTGRES_PORT:-5432}" 60
 wait_for_http "http://${MINIO_HOST}:${MINIO_PORT}/minio/health/live" 60
 
-USE_GHCR=0
-if [[ "${FALCON_DEPLOY_MODE:-}" == "ghcr" ]] || [[ -n "${GHCR_IMAGE_PREFIX:-}" ]]; then
-  USE_GHCR=1
+if [[ "${USE_GHCR}" == "1" ]]; then
   [[ -n "${GHCR_IMAGE_PREFIX:-}" ]] || die "GHCR mode requires GHCR_IMAGE_PREFIX in .env.app"
 fi
 
@@ -66,13 +83,12 @@ elif [[ "${BUILD_FLAG}" == "1" ]]; then
   UP_ARGS+=(--build)
 fi
 
-log "Starting application stack..."
+log "Starting application stack (COMPOSE_PROFILES=${COMPOSE_PROFILES:-<none>})..."
 "${COMPOSE[@]}" "${UP_ARGS[@]}"
 
 if [[ "${USE_GHCR}" == "1" ]]; then
-  # Command overrides (run-py vs python api.py) require recreate, not just restart.
-  log "Recreating bytecode Python workers (worker-fb, worker-x)..."
-  "${COMPOSE[@]}" "${COMPOSE_ARGS[@]}" up -d --no-build --force-recreate worker-fb worker-x
+  log "Recreating bytecode Python workers (run-py entrypoints)..."
+  "${COMPOSE[@]}" "${COMPOSE_ARGS[@]}" up -d --no-build --force-recreate "${GHCR_BYTECODE_WORKERS[@]}"
 fi
 
 if [[ "${USE_GHCR}" == "1" ]]; then
@@ -83,6 +99,11 @@ fi
 
 if [[ "${BUILD_FLAG}" == "1" ]]; then
   prune_docker_artifacts 1
+fi
+
+if [[ "${USE_GHCR}" == "1" ]]; then
+  bash "${SCRIPT_DIR}/verify-scrapers.sh" || \
+    warn "Scraper verification failed — run: bash scripts/deploy/verify-scrapers.sh"
 fi
 
 ok "Application deployment complete."

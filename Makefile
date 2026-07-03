@@ -1,4 +1,4 @@
-.PHONY: init-storage init-app deploy-storage deploy-app deploy-ghcr deploy-status deploy-down fix-crlf fix-worker-entrypoints clean-docker logs-app logs-storage \
+.PHONY: init-storage init-app deploy-storage deploy-app deploy-ghcr deploy-status deploy-down fix-crlf fix-worker-entrypoints verify-scrapers clean-docker logs-app logs-storage \
 	db-push db-push-loss db-generate db-seed db-status db-psql \
 	db-exec-push db-exec-push-loss db-exec-generate db-exec-seed db-copy-schema help
 
@@ -15,6 +15,7 @@ help:
 	@echo "    make deploy-ghcr      Pull application stack from GHCR (no source build)"
 	@echo "    make fix-crlf         Fix Windows CRLF in .env and shell scripts (Linux client)"
 	@echo "    make fix-worker-entrypoints  Fix worker-fb/worker-x python api.py crash (GHCR)"
+	@echo "    make verify-scrapers   Check all scraper containers are running"
 	@echo ""
 	@echo "  make deploy-status    Show running services"
 	@echo "  make deploy-down      Stop stacks"
@@ -57,6 +58,9 @@ fix-crlf:
 
 fix-worker-entrypoints:
 	bash scripts/deploy/fix-worker-entrypoints.sh
+
+verify-scrapers:
+	bash scripts/deploy/verify-scrapers.sh
 
 deploy-status:
 	bash scripts/deploy/deploy.sh status

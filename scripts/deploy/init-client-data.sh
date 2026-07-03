@@ -19,6 +19,10 @@ patch_compose_python_entrypoints() {
   fi
 }
 
+ensure_compose_profiles() {
+  bash "${ROOT_DIR}/scripts/deploy/ensure-scrapers-profile.sh" 2>/dev/null || true
+}
+
 ensure_file() {
   local path="$1"
   if [[ -d "${path}" ]]; then
@@ -67,5 +71,6 @@ ensure_dir  "${ROOT_DIR}/apps/scrapers/worker-image/image_chrome_profile"
 ensure_dir  "${ROOT_DIR}/apps/internal-ai/internal-ai-profile"
 
 patch_compose_python_entrypoints
+ensure_compose_profiles
 
 log "Client data paths ready under ${ROOT_DIR}"

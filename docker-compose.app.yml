@@ -178,6 +178,8 @@ services:
       MINIO_USE_GATEWAY_URL: 'true'
       WEB_WORKER_URL: http://web-worker:8000
       INTERNAL_AI_WORKER_URL: http://internal-ai:8000
+      WORKER_LINKEDIN_URL: http://worker-linkedin:3011
+      WORKER_IMAGE_URL: http://worker-image:3015
       WORKER_X_URL: http://worker-x:3013
       WORKER_NEWS_SCHEDULE_URL: http://worker-news-scheduler:3012
       WORKER_NEWS_POOL_URLS: http://worker-news-media-1:3012
@@ -210,6 +212,8 @@ services:
       redis:
         condition: service_started
       internal-ai:
+        condition: service_started
+      web-worker:
         condition: service_started
     volumes:
     - /var/run/docker.sock:/var/run/docker.sock
@@ -1192,9 +1196,9 @@ services:
       start_period: 40s
       test:
       - CMD
-      - python
-      - -c
-      - import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')
+      - curl
+      - -f
+      - http://127.0.0.1:8000/health
     deploy:
       resources:
         limits:
@@ -1245,9 +1249,9 @@ services:
       start_period: 40s
       test:
       - CMD
-      - python
-      - -c
-      - import urllib.request; urllib.request.urlopen('http://127.0.0.1:3015/health')
+      - curl
+      - -f
+      - http://127.0.0.1:3015/health
     deploy:
       resources:
         limits:
@@ -1297,10 +1301,8 @@ services:
       retries: 3
       start_period: 40s
       test:
-      - CMD
-      - python
-      - -c
-      - import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')
+      - CMD-SHELL
+      - wget -q -O /dev/null http://127.0.0.1:8000/health || exit 1
     deploy:
       resources:
         limits:
