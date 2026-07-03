@@ -156,10 +156,10 @@ run_db_action() {
       shell_cmd="cd ${DB_DIR} && npm run seed:news-media-groups"
       ;;
     seed-geo)
-      shell_cmd="cd ${DB_DIR} && npx ts-node prisma/seed-geo.ts"
+      shell_cmd="cd ${DB_DIR} && node dist/prisma/seed-geo.js"
       ;;
     seed-videos)
-      shell_cmd="cd ${DB_DIR} && npm run seed:videos"
+      shell_cmd="cd ${DB_DIR} && node dist/prisma/seed-videos-only.js"
       ;;
     migrate)
       shell_cmd="cd ${DB_DIR} && npx prisma migrate deploy"
