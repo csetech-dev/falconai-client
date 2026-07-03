@@ -177,6 +177,7 @@ services:
       MINIO_PUBLIC_USE_SSL: 'false'
       MINIO_USE_GATEWAY_URL: 'true'
       WEB_WORKER_URL: http://web-worker:8000
+      INTERNAL_AI_WORKER_URL: http://internal-ai:8000
       WORKER_X_URL: http://worker-x:3013
       WORKER_NEWS_SCHEDULE_URL: http://worker-news-scheduler:3012
       WORKER_NEWS_POOL_URLS: http://worker-news-media-1:3012
@@ -207,6 +208,8 @@ services:
       SOCIAL_SCRAPER_CONCURRENCY: ${SOCIAL_SCRAPER_CONCURRENCY:-10}
     depends_on:
       redis:
+        condition: service_started
+      internal-ai:
         condition: service_started
     volumes:
     - /var/run/docker.sock:/var/run/docker.sock
@@ -391,9 +394,9 @@ services:
       start_period: 90s
       test:
       - CMD
-      - curl
-      - -f
-      - http://localhost:4000/api/v1/health
+      - node
+      - -e
+      - require('http').get('http://localhost:4000/api/v1/health', (r) => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))
     deploy:
       resources:
         limits:
@@ -1154,7 +1157,6 @@ services:
     networks:
     - falcon-net
   web-worker:
-    profiles: ["scrapers"]
     build:
       context: ./apps/web-worker
       dockerfile: Dockerfile
@@ -1177,8 +1179,7 @@ services:
       ]; do sleep 0.2; done; export DISPLAY=:99; openbox --config-file /app/openbox-rc.xml
       >/tmp/openbox.log 2>&1 & x11vnc -display :99 -forever -shared -nopw -listen
       0.0.0.0 -rfbport 5900 >/tmp/x11vnc.log 2>&1 & websockify --web=/usr/share/novnc/
-      7900 localhost:5900 >/tmp/websockify.log 2>&1 & uvicorn api:app --host 0.0.0.0
-      --port 8000
+      7900 localhost:5900 >/tmp/websockify.log 2>&1 & run-py api
 
       '
     volumes:
@@ -1264,7 +1265,6 @@ services:
     networks:
     - falcon-net
   internal-ai:
-    profiles: ["scrapers"]
     build:
       context: ./apps/internal-ai
       dockerfile: Dockerfile
@@ -1286,8 +1286,7 @@ services:
       ]; do sleep 0.2; done; export DISPLAY=:99; openbox --config-file /app/openbox-rc.xml
       >/tmp/openbox.log 2>&1 & x11vnc -display :99 -forever -shared -nopw -listen
       0.0.0.0 -rfbport 5900 >/tmp/x11vnc.log 2>&1 & websockify --web=/usr/share/novnc/
-      7900 localhost:5900 >/tmp/websockify.log 2>&1 & uvicorn api:app --host 0.0.0.0
-      --port 8000
+      7900 localhost:5900 >/tmp/websockify.log 2>&1 & run-py api
 
       '
     volumes:

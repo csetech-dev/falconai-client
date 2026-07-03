@@ -65,6 +65,12 @@ log "Starting application stack..."
 "${COMPOSE[@]}" "${UP_ARGS[@]}"
 
 if [[ "${USE_GHCR}" == "1" ]]; then
+  # Command overrides (run-py vs python api.py) require recreate, not just restart.
+  log "Recreating bytecode Python workers (worker-fb, worker-x)..."
+  "${COMPOSE[@]}" "${COMPOSE_ARGS[@]}" up -d --no-build --force-recreate worker-fb worker-x
+fi
+
+if [[ "${USE_GHCR}" == "1" ]]; then
   log "Applying Prisma schema (one-off container)..."
   bash "${SCRIPT_DIR}/db.sh" push || \
     warn "prisma db push failed — check DATABASE_URL in .env.app and falcon-core logs."
