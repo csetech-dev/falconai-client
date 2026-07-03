@@ -19,6 +19,11 @@ ensure_env_file "${ENV_EXAMPLE}" "${ENV_FILE}" "application environment" "make i
 load_env_file "${ENV_FILE}"
 resolve_storage_host
 
+if [[ -z "${COMPOSE_PROFILES:-}" ]] || [[ "${COMPOSE_PROFILES}" != *scrapers* ]]; then
+  warn "COMPOSE_PROFILES does not include 'scrapers' — worker-news, worker-fb, worker-linkedin, etc. will NOT start."
+  warn "Add COMPOSE_PROFILES=scrapers to .env.app, then run: make deploy-ghcr"
+fi
+
 [[ -n "${POSTGRES_HOST:-}" ]] || die "POSTGRES_HOST or STORAGE_SERVER_IP must be set in .env.app"
 [[ -n "${MINIO_ENDPOINT:-}" ]] || die "MINIO_ENDPOINT or STORAGE_SERVER_IP must be set in .env.app"
 [[ -n "${PUBLIC_GATEWAY_URL:-}" ]] || die "PUBLIC_GATEWAY_URL must be set in .env.app"
