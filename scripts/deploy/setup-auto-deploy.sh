@@ -80,6 +80,11 @@ systemctl daemon-reload
 systemctl enable --now falcon-deploy-agent.service
 systemctl enable --now falcon-ghcr-webhook.service
 
+if ! grep -q '^FALCON_DEPLOY_MODE=' "${DEPLOY_DIR}/.env.app" 2>/dev/null; then
+  echo "FALCON_DEPLOY_MODE=ghcr" >> "${DEPLOY_DIR}/.env.app"
+  log "Appended FALCON_DEPLOY_MODE=ghcr to ${DEPLOY_DIR}/.env.app"
+fi
+
 public_ip=""
 if command -v curl >/dev/null 2>&1; then
   public_ip="$(curl -fsS --max-time 3 https://api.ipify.org 2>/dev/null || true)"

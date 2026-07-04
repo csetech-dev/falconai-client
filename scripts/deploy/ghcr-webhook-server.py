@@ -44,6 +44,10 @@ class WebhookHandler(BaseHTTPRequestHandler):
         self.end_headers()
 
     def do_POST(self) -> None:
+        if self.path.rstrip("/") not in ("", "/deploy"):
+            self.send_response(404)
+            self.end_headers()
+            return
         if not self._authorized():
             self._json(401, {"error": "unauthorized"})
             return
@@ -58,6 +62,11 @@ class WebhookHandler(BaseHTTPRequestHandler):
                 pass
 
         TRIGGER.parent.mkdir(parents=True, exist_ok=True)
+        payload_path = TRIGGER.parent / "trigger.json"
+        if raw:
+            payload_path.write_bytes(raw)
+        else:
+            payload_path.write_text("{}", encoding="utf-8")
         TRIGGER.touch()
         self.log_message("deploy queued sha=%s", sha)
         self._json(202, {"status": "accepted", "sha": sha})

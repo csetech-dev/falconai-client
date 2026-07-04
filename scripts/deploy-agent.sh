@@ -22,6 +22,7 @@ set -euo pipefail
 PROJECT_DIR="${FALCON_PROJECT_DIR:-/opt/FalconAI}"
 DEPLOY_DIR="${FALCON_DEPLOY_DIR:-$PROJECT_DIR/.deploy}"
 TRIGGER_FILE="$DEPLOY_DIR/trigger"
+TRIGGER_JSON="$DEPLOY_DIR/trigger.json"
 DEPLOY_MODE="${FALCON_DEPLOY_MODE:-git}"
 GHCR_IMAGE_PREFIX="${GHCR_IMAGE_PREFIX:-}"
 FALCON_IMAGE_TAG="${FALCON_IMAGE_TAG:-latest}"
@@ -104,6 +105,25 @@ fail_deployment() {
   date -u +"%Y-%m-%dT%H:%M:%S.000Z" > "$COMPLETED_AT_FILE"
 }
 
+load_trigger_payload() {
+  if [[ ! -f "$TRIGGER_JSON" ]]; then
+    return 0
+  fi
+  if command -v python3 >/dev/null 2>&1; then
+    local sha ref
+    sha="$(python3 -c "import json; d=json.load(open('${TRIGGER_JSON}')); print(d.get('sha','') or '')" 2>/dev/null || true)"
+    ref="$(python3 -c "import json; d=json.load(open('${TRIGGER_JSON}')); print(d.get('ref','') or '')" 2>/dev/null || true)"
+    if [[ -n "$sha" && "$sha" != "unknown" ]]; then
+      export FALCON_IMAGE_TAG="$sha"
+      log "[deploy-agent] Image tag from webhook: ${FALCON_IMAGE_TAG}"
+    fi
+    if [[ -n "$ref" ]]; then
+      log "[deploy-agent] Git ref from webhook: ${ref}"
+    fi
+  fi
+  rm -f "$TRIGGER_JSON"
+}
+
 run_deployment() {
   ensure_deploy_dir
   echo "running" > "$STATUS_FILE"
@@ -122,6 +142,8 @@ run_deployment() {
     source "$PROJECT_DIR/.env.app"
     set +a
   fi
+
+  load_trigger_payload
 
   if [[ "$DEPLOY_MODE" == "ghcr" ]]; then
     # ---- GHCR client bundle: pull images + up (no git) ----
@@ -288,9 +310,15 @@ run_command() {
 # Main watch loop
 while true; do
   if [ -f "$TRIGGER_FILE" ]; then
+    status="$(cat "$STATUS_FILE" 2>/dev/null || echo idle)"
+    if [ "$status" = "running" ]; then
+      sleep 2
+      continue
+    fi
     rm -f "$TRIGGER_FILE"
     echo "[deploy-agent] Trigger detected — starting deployment..."
     run_deployment || true
+    continue
   fi
 
   if [ -f "$CMD_TRIGGER_FILE" ]; then

@@ -1,4 +1,4 @@
-.PHONY: init-storage init-app deploy-storage deploy-app deploy-ghcr deploy-status deploy-down fix-crlf fix-worker-entrypoints verify-scrapers clean-docker logs-app logs-storage \
+.PHONY: init-storage init-app deploy-storage deploy-app deploy-ghcr deploy-status deploy-down fix-crlf fix-worker-entrypoints verify-scrapers clean-docker setup-auto-deploy logs-app logs-storage \
 	db-push db-push-loss db-generate db-seed db-seed-videos db-status db-psql \
 	db-exec-push db-exec-push-loss db-exec-generate db-exec-seed db-exec-seed-videos db-copy-schema help
 
@@ -13,6 +13,7 @@ help:
 	@echo "    make init-app         Create .env.app"
 	@echo "    make deploy-app       Start application stack (build from source)"
 	@echo "    make deploy-ghcr      Pull application stack from GHCR (no source build)"
+	@echo "    make setup-auto-deploy  Install webhook + deploy-agent for CI auto-deploy"
 	@echo "    make fix-crlf         Fix Windows CRLF in .env and shell scripts (Linux client)"
 	@echo "    make fix-worker-entrypoints  Fix worker-fb/worker-x python api.py crash (GHCR)"
 	@echo "    make verify-scrapers   Check all scraper containers are running"
@@ -54,6 +55,9 @@ deploy-app:
 
 deploy-ghcr:
 	bash scripts/deploy/deploy.sh ghcr
+
+setup-auto-deploy:
+	sudo bash scripts/deploy/setup-auto-deploy.sh
 
 fix-crlf:
 	bash scripts/deploy/fix-crlf.sh
