@@ -18,6 +18,15 @@ source "${SCRIPT_DIR}/common.sh"
 ENV_FILE="${ROOT_DIR}/.env.app"
 DB_DIR="/app/libs/database"
 CORE_CONTAINER="${FALCON_CORE_CONTAINER:-falcon-core}"
+HOST_SCHEMA="${ROOT_DIR}/libs/database/prisma/schema.prisma"
+
+is_ghcr_deploy() {
+  [[ "${FALCON_DEPLOY_MODE:-}" == "ghcr" ]] || [[ -n "${GHCR_IMAGE_PREFIX:-}" ]]
+}
+
+has_host_schema() {
+  [[ -f "${HOST_SCHEMA}" ]]
+}
 
 usage() {
   cat <<'EOF'
@@ -79,6 +88,9 @@ run_in_core() {
   detect_compose
   compose_db_args
 
+  if is_ghcr_deploy && ! has_host_schema; then
+    log "GHCR client bundle: using schema baked into falcon-core image (no host schema.prisma)"
+  fi
   log "One-off falcon-core container (DATABASE_URL from .env.app)..."
   "${COMPOSE[@]}" "${COMPOSE_DB_ARGS[@]}" run --rm --no-deps falcon-core \
     sh -lc "${shell_cmd}"
@@ -93,9 +105,14 @@ run_in_running_core() {
 
 copy_schema_to_core() {
   require_running_core
-  local schema="${ROOT_DIR}/libs/database/prisma/schema.prisma"
-  [[ -f "${schema}" ]] || die "Schema not found: ${schema}"
-  docker cp "${schema}" "${CORE_CONTAINER}:${DB_DIR}/prisma/schema.prisma"
+  if ! has_host_schema; then
+    if is_ghcr_deploy; then
+      warn "No host schema at ${HOST_SCHEMA} — using schema baked into ${CORE_CONTAINER} image"
+      return 0
+    fi
+    die "Schema not found: ${HOST_SCHEMA}"
+  fi
+  docker cp "${HOST_SCHEMA}" "${CORE_CONTAINER}:${DB_DIR}/prisma/schema.prisma"
   ok "Copied schema → ${CORE_CONTAINER}:${DB_DIR}/prisma/schema.prisma"
 }
 
@@ -175,6 +192,9 @@ run_db_action() {
   if [[ "${mode}" == "oneoff" ]]; then
     run_in_core "${shell_cmd}"
   else
+    if [[ "${action}" == "push" || "${action}" == "push-loss" ]]; then
+      copy_schema_to_core
+    fi
     run_in_running_core "${shell_cmd}"
   fi
 }

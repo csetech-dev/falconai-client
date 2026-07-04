@@ -51,6 +51,7 @@ clean_excludes=(
   -e .deploy/
   -e apps/scrapers/worker-fb/facebook_vnc_profile/
   -e apps/scrapers/worker-search/brave_profile/
+  -e apps/web-worker/.chrome-profile/
 )
 
 # Ensure deploy dir exists
@@ -162,6 +163,9 @@ run_deployment() {
       fail_deployment "scripts/deploy/deploy.sh ghcr failed"
       return 1
     fi
+
+    # Schema ships inside the pulled falcon-core image — no host checkout required.
+    run_prisma_db_push || return 1
   else
     mapfile -t COMPOSE_FILE_ARGS < <(compose_args)
     # ---- Step 1: Sync repository to origin/main ----
