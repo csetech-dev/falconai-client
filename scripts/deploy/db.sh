@@ -43,6 +43,8 @@ One-off container (falcon-core does NOT need to be running; uses .env.app):
   seed-news-media   npm run seed:news-media-groups
   seed-geo          tsx prisma/seed-geo.ts
   seed-videos       demo video intelligence data (1 talk show + 1 general)
+  seed-twitter-profiles  Twitter/X profiles via auto-fill (exec only — needs running falcon-core + worker-x)
+  seed-telegram-profiles Telegram channels via auto-fill (exec only — needs falcon-core + worker-telegram session)
   migrate           prisma migrate deploy
   status            prisma migrate status
   psql              psql client (args after --)
@@ -178,6 +180,18 @@ run_db_action() {
     seed-videos)
       shell_cmd="cd ${DB_DIR} && node dist/prisma/seed-videos-only.js"
       ;;
+    seed-twitter-profiles)
+      if [[ "${mode}" == "oneoff" ]]; then
+        die "seed-twitter-profiles must run in a running falcon-core container (use: db.sh exec seed-twitter-profiles). Requires worker-x authorized."
+      fi
+      shell_cmd="cd ${DB_DIR} && npm run seed:twitter-profiles"
+      ;;
+    seed-telegram-profiles)
+      if [[ "${mode}" == "oneoff" ]]; then
+        die "seed-telegram-profiles must run in a running falcon-core container (use: db.sh exec seed-telegram-profiles). Requires Telegram session authorized in technical panel."
+      fi
+      shell_cmd="cd ${DB_DIR} && npm run seed:telegram-profiles"
+      ;;
     migrate)
       shell_cmd="cd ${DB_DIR} && npx prisma migrate deploy"
       ;;
@@ -217,6 +231,12 @@ main() {
     seed|seed-prompts|seed-news-sources|seed-news-status|seed-news-media|seed-geo|seed-videos)
       run_db_action oneoff "${command}"
       ;;
+    seed-twitter-profiles)
+      run_db_action exec seed-twitter-profiles
+      ;;
+    seed-telegram-profiles)
+      run_db_action exec seed-telegram-profiles
+      ;;
     migrate)
       run_db_action oneoff migrate
       ;;
@@ -237,11 +257,11 @@ main() {
           warn "exec push-loss may drop columns/tables — backup first if unsure."
           run_db_action exec push 1
           ;;
-        generate|seed|seed-prompts|seed-news-sources|seed-news-status|seed-news-media|seed-geo|seed-videos|migrate|status)
+        generate|seed|seed-prompts|seed-news-sources|seed-news-status|seed-news-media|seed-geo|seed-videos|seed-twitter-profiles|seed-telegram-profiles|migrate|status)
           run_db_action exec "${sub}"
           ;;
         "")
-          die "Usage: db.sh exec <push|push-loss|generate|seed|seed-prompts|seed-news-sources|seed-news-status|seed-news-media|seed-geo|seed-videos|migrate|status|...>"
+          die "Usage: db.sh exec <push|push-loss|generate|seed|seed-prompts|seed-news-sources|seed-news-status|seed-news-media|seed-geo|seed-videos|seed-twitter-profiles|seed-telegram-profiles|migrate|status|...>"
           ;;
         *)
           run_in_running_core "$*"

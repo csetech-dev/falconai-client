@@ -1,6 +1,7 @@
 .PHONY: init-storage init-app deploy-storage deploy-app deploy-ghcr deploy-status deploy-down fix-crlf fix-worker-entrypoints verify-scrapers clean-docker setup-auto-deploy logs-app logs-storage \
 	db-push db-push-loss db-generate db-seed db-seed-videos db-status db-psql \
-	db-exec-push db-exec-push-loss db-exec-generate db-exec-seed db-exec-seed-videos db-copy-schema help
+	db-exec-push db-exec-push-loss db-exec-generate db-exec-seed db-exec-seed-videos db-exec-seed-twitter-profiles db-exec-seed-telegram-profiles db-copy-schema \
+	dump-db help
 
 help:
 	@echo "FalconAI split deployment (any host — pick the stack you need)"
@@ -33,6 +34,9 @@ help:
 	@echo "    make db-status        migration status"
 	@echo "    make db-psql          list tables"
 	@echo ""
+	@echo "  Backup:"
+	@echo "    make dump-db          dump Postgres DB to ./db-backups (uses Docker pg_dump)"
+	@echo ""
 	@echo "  Database — running falcon-core (classic docker exec):"
 	@echo "    make db-copy-schema   copy schema.prisma into container"
 	@echo "    make db-exec-push     db push --skip-generate via docker exec"
@@ -40,6 +44,8 @@ help:
 	@echo "    make db-exec-generate prisma generate via docker exec"
 	@echo "    make db-exec-seed     run full database seed flow via docker exec"
 	@echo "    make db-exec-seed-videos  seed demo videos via docker exec"
+	@echo "    make db-exec-seed-twitter-profiles  seed Twitter/X profiles (worker-x must be authorized)"
+	@echo "    make db-exec-seed-telegram-profiles seed Telegram channels (technical-panel Telegram OTP session required)"
 
 init-storage:
 	bash scripts/deploy/deploy.sh init-storage
@@ -121,3 +127,12 @@ db-exec-seed:
 
 db-exec-seed-videos:
 	bash scripts/deploy/db.sh exec seed-videos
+
+db-exec-seed-twitter-profiles:
+	bash scripts/deploy/db.sh exec seed-twitter-profiles
+
+db-exec-seed-telegram-profiles:
+	bash scripts/deploy/db.sh exec seed-telegram-profiles
+
+dump-db:
+	bash scripts/dump-db.sh
