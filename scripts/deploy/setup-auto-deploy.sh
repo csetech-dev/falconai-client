@@ -111,15 +111,24 @@ Auto-deploy services installed.
 
 GitHub repo → Settings → Secrets and variables → Actions:
 
-  CLIENT_DEPLOY_WEBHOOK         = http://YOUR_PUBLIC_IP:${WEBHOOK_PORT}/deploy
+  CLIENT_DEPLOY_WEBHOOK         = http://YOUR_PUBLIC_IP:12006/deploy
   CLIENT_DEPLOY_WEBHOOK_SECRET  = ${secret}
 
-${public_ip:+Detected public IP: ${public_ip} → http://${public_ip}:${WEBHOOK_PORT}/deploy}
+  (Prefer :12006 via api-gateway. Direct :${WEBHOOK_PORT} often hits nginx → 405.)
 
-Open firewall (example):
+${public_ip:+Detected public IP: ${public_ip} → http://${public_ip}:12006/deploy}
+
+Ensure gateway can reach host webhook (docker-compose extra_hosts host.docker.internal).
+Optional direct port:
   sudo ufw allow ${WEBHOOK_PORT}/tcp
 
-Test from another machine:
+Test from another machine (recommended):
+  curl -sS -X POST "http://YOUR_PUBLIC_IP:12006/deploy" \\
+    -H "Authorization: Bearer ${secret}" \\
+    -H "Content-Type: application/json" \\
+    -d '{"sha":"test"}'
+
+Or direct (may fail with 405 if :${WEBHOOK_PORT} is forwarded to nginx):
   curl -sS -X POST "http://YOUR_PUBLIC_IP:${WEBHOOK_PORT}/deploy" \\
     -H "Authorization: Bearer ${secret}" \\
     -H "Content-Type: application/json" \\
