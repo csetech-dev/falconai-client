@@ -20,7 +20,16 @@
 set -euo pipefail
 
 PROJECT_DIR="${FALCON_PROJECT_DIR:-/opt/FalconAI}"
-DEPLOY_DIR="${FALCON_DEPLOY_DIR:-$PROJECT_DIR/.deploy}"
+# Status/trigger dir must be PROJECT/.deploy. Older units wrongly set
+# FALCON_DEPLOY_DIR to the project root (same as FALCON_PROJECT_DIR) — that
+# made the agent watch PROJECT/trigger while the webhook wrote PROJECT/.deploy/trigger.
+if [[ -n "${FALCON_STATUS_DIR:-}" ]]; then
+  DEPLOY_DIR="${FALCON_STATUS_DIR}"
+elif [[ -n "${FALCON_DEPLOY_DIR:-}" && "${FALCON_DEPLOY_DIR}" != "${PROJECT_DIR}" && "${FALCON_DEPLOY_DIR}" == */.deploy ]]; then
+  DEPLOY_DIR="${FALCON_DEPLOY_DIR}"
+else
+  DEPLOY_DIR="${PROJECT_DIR}/.deploy"
+fi
 TRIGGER_FILE="$DEPLOY_DIR/trigger"
 TRIGGER_JSON="$DEPLOY_DIR/trigger.json"
 DEPLOY_MODE="${FALCON_DEPLOY_MODE:-git}"

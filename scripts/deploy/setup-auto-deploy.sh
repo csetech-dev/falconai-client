@@ -80,6 +80,17 @@ systemctl daemon-reload
 systemctl enable --now falcon-deploy-agent.service
 systemctl enable --now falcon-ghcr-webhook.service
 
+# Ensure agent watches PROJECT/.deploy (not project root) — fix older broken units
+if grep -q 'Environment=FALCON_DEPLOY_DIR=/opt/falconai-client$' "${AGENT_UNIT}" 2>/dev/null \
+  || grep -q "Environment=FALCON_DEPLOY_DIR=${DEPLOY_DIR}$" "${AGENT_UNIT}" 2>/dev/null; then
+  if ! grep -q 'FALCON_STATUS_DIR' "${AGENT_UNIT}"; then
+    sed -i "s|Environment=FALCON_DEPLOY_DIR=.*|Environment=FALCON_STATUS_DIR=${DEPLOY_DIR}/.deploy|" "${AGENT_UNIT}"
+    systemctl daemon-reload
+    systemctl restart falcon-deploy-agent.service
+    log "Fixed agent status dir → ${DEPLOY_DIR}/.deploy"
+  fi
+fi
+
 if ! grep -q '^FALCON_DEPLOY_MODE=' "${DEPLOY_DIR}/.env.app" 2>/dev/null; then
   echo "FALCON_DEPLOY_MODE=ghcr" >> "${DEPLOY_DIR}/.env.app"
   log "Appended FALCON_DEPLOY_MODE=ghcr to ${DEPLOY_DIR}/.env.app"
