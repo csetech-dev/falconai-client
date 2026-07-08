@@ -1122,8 +1122,11 @@ services:
       MINIO_BUCKET: imas
       MINIO_USE_SSL: 'false'
       VIDEO_QUEUE_NAME: video-jobs
-      WORKER_CONCURRENCY: 4
-      GUNICORN_WORKERS: 4
+      # Bounded so concurrent yt-dlp/ffmpeg downloads (which write to the RAM
+      # tmpfs below) + the resident VNC Chrome (~1.7G) can't blow the memory cap
+      # and trigger OOM SIGKILL of the download workers.
+      WORKER_CONCURRENCY: 2
+      GUNICORN_WORKERS: 2
       YT_API_KEY: ${YT_API_KEY:-}
       PROXY_ROTATOR_URL: http://proxy-rotator:8888
       PROXY_ENABLED: 'true'
@@ -1131,6 +1134,10 @@ services:
     volumes:
     - video_downloads:/app/downloads
     - ./apps/scrapers/worker-video/cookies.txt:/app/cookies.txt:rw
+    # Persist the YouTube VNC login across redeploys — same host-bind pattern as
+    # worker-fb's facebook_vnc_profile. Otherwise every recreate wipes the
+    # operator's session and downloads start hitting YouTube's bot check.
+    - ./apps/scrapers/worker-video/youtube_vnc_profile:/app/youtube_vnc_profile
     tmpfs:
     - /app/downloads/tmp:size=5g,mode=1777
     depends_on:
@@ -1149,7 +1156,10 @@ services:
     deploy:
       resources:
         limits:
-          memory: 2G
+          # Must fit: VNC Chrome (~1.7G) + the 5G download tmpfs (RAM-backed,
+          # counts against this cgroup) + concurrent yt-dlp/ffmpeg. 2G caused
+          # constant OOM SIGKILL of downloads.
+          memory: 6G
           cpus: '2'
         reservations:
           memory: 512M

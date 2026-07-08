@@ -683,6 +683,14 @@ model SocialAccount {
   jobsToday           Int        @default(0)
   totalJobs           Int        @default(0)
   dailyJobLimit       Int?       @default(200)        // max jobs/day for this lane; null = unlimited (default 200)
+  // Daily TIME budget — a second, parallel throttle to dailyJobLimit. A lane
+  // stops accepting NEW jobs when EITHER the job cap OR the time cap is hit.
+  // Enforced in worker-fb lane_manager.try_acquire; null/0 = unlimited.
+  dailyTimeLimitSeconds Int?     @default(0)          // max active seconds/day; null/0 = unlimited
+  timeUsedTodaySeconds  Int      @default(0)          // accumulated active seconds today (telemetry mirror)
+  // The calendar day (YYYY-MM-DD, worker TZ) jobsToday/timeUsedTodaySeconds
+  // belong to — lets the worker re-hydrate counters on restart only if still today.
+  countersDate          String?
 
   createdBy  String?                                 // super admin user id
   createdAt  DateTime            @default(now())
