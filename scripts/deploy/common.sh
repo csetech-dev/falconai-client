@@ -266,6 +266,35 @@ resolve_storage_host() {
   fi
 }
 
+resolve_app_host() {
+  if [[ -z "${APP_HOST:-}" && -n "${STORAGE_SERVER_IP:-}" ]]; then
+    export APP_HOST="${STORAGE_SERVER_IP}"
+  fi
+  if [[ -z "${PUBLIC_GATEWAY_URL:-}" && -n "${APP_HOST:-}" ]]; then
+    export PUBLIC_GATEWAY_URL="http://${APP_HOST}:${GATEWAY_PORT:-12006}"
+  fi
+  if [[ -z "${OIDC_CALLBACK_URL:-}" && -n "${PUBLIC_GATEWAY_URL:-}" ]]; then
+    export OIDC_CALLBACK_URL="${PUBLIC_GATEWAY_URL}/api/auth/oidc/callback"
+  fi
+  if [[ -z "${OIDC_FRONTEND_URL:-}" && -n "${APP_HOST:-}" ]]; then
+    export OIDC_FRONTEND_URL="http://${APP_HOST}:${FRONTEND_PORT:-12001}"
+  fi
+  if [[ -z "${AUTH_CORS_ORIGIN:-}" && -n "${APP_HOST:-}" ]]; then
+    export AUTH_CORS_ORIGIN="http://${APP_HOST}:${FRONTEND_PORT:-12001}"
+  fi
+  if [[ -z "${OIDC_AUTHORIZATION_URL:-}" && -n "${APP_HOST:-}" ]]; then
+    export OIDC_AUTHORIZATION_URL="http://${APP_HOST}:${KEYCLOAK_HOST_PORT:-12080}/realms/falcon/protocol/openid-connect/auth"
+  fi
+  if [[ -z "${KEYCLOAK_HOST:-}" && -n "${APP_HOST:-}" ]]; then
+    export KEYCLOAK_HOST="${APP_HOST}"
+  fi
+}
+
+resolve_deploy_env() {
+  resolve_storage_host
+  resolve_app_host
+}
+
 print_storage_banner() {
   local ip="${1}"
   cat <<EOF
@@ -274,10 +303,7 @@ print_storage_banner() {
 │  Storage stack is up. Use these values in .env.app on the app host │
 ├──────────────────────────────────────────────────────────────────┤
 │  STORAGE_SERVER_IP=${ip}
-│  POSTGRES_HOST=${ip}
-│  POSTGRES_PORT=${POSTGRES_PORT:-12002}
-│  MINIO_ENDPOINT=${ip}:${MINIO_API_PORT:-12004}
-│  MINIO_PUBLIC_ENDPOINT=${ip}:${MINIO_API_PORT:-12004}
+│  (POSTGRES_HOST / MINIO_* derived automatically if omitted)
 ├──────────────────────────────────────────────────────────────────┤
 │  PostgreSQL:  ${ip}:${POSTGRES_PORT:-12002}
 │  MinIO API:    http://${ip}:${MINIO_API_PORT:-12004}
@@ -299,7 +325,7 @@ print_app_banner() {
 │  Application stack is up                                         │
 ├──────────────────────────────────────────────────────────────────┤
 │  Gateway:    ${PUBLIC_GATEWAY_URL:-http://localhost:12006}
-│  Frontend:   http://localhost:12001
+│  Frontend:   http://${APP_HOST:-localhost}:12001
 │  Adminer:    ${PUBLIC_GATEWAY_URL:-http://localhost:12006}/databaselookup
 │  MinIO UI:   ${PUBLIC_GATEWAY_URL:-http://localhost:12006}/storage-console/
 │  Storage DB: ${POSTGRES_HOST}:${POSTGRES_PORT:-5432}

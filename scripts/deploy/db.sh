@@ -78,6 +78,7 @@ require_running_core() {
 compose_db_args() {
   [[ -f "${ENV_FILE}" ]] || die "Missing ${ENV_FILE}. Run: make init-app"
   load_env_file "${ENV_FILE}"
+  resolve_deploy_env
 
   COMPOSE_DB_ARGS=(--env-file "${ENV_FILE}" -f "${APP_COMPOSE}")
   if [[ "${FALCON_DEPLOY_MODE:-}" == "ghcr" ]] || [[ -n "${GHCR_IMAGE_PREFIX:-}" ]]; then
@@ -120,7 +121,8 @@ copy_schema_to_core() {
 
 run_psql() {
   load_env_file "${ENV_FILE}"
-  [[ -n "${POSTGRES_HOST:-}" ]] || die "POSTGRES_HOST not set in .env.app"
+  resolve_deploy_env
+  [[ -n "${POSTGRES_HOST:-}" ]] || die "POSTGRES_HOST or STORAGE_SERVER_IP not set in .env.app"
 
   local args=("$@")
   if [[ ${#args[@]} -eq 0 ]]; then

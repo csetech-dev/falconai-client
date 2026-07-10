@@ -26,6 +26,12 @@ enum UserRole {
   API_CLIENT
 }
 
+enum AuthProvider {
+  LOCAL
+  OIDC
+  SAML
+}
+
 enum PermissionAction {
   READ
   CREATE
@@ -252,11 +258,13 @@ model User {
   id              String     @id @default(cuid())
   email           String     @unique
   username        String?
-  password        String
+  password        String?
   firstName       String?
   lastName        String?
   roles           UserRole[] @default([USER])
   isActive        Boolean    @default(true)
+  authProvider    AuthProvider @default(LOCAL)
+  externalSubjectId String?
   refreshToken    String?
   lastLogin       DateTime?
   apiKey          String?

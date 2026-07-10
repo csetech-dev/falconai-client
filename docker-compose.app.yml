@@ -263,12 +263,26 @@ services:
       DATABASE_POOL_IDLE_MS: ${AUTH_DB_POOL_IDLE_MS:-30000}
       DATABASE_APPLICATION_NAME: ${AUTH_DB_APP_NAME:-falcon-auth}
       JWT_SECRET: ${JWT_SECRET:-falcon-ai-jwt-secret}
-      JWT_EXPIRATION: 24h
+      JWT_EXPIRATION: ${JWT_EXPIRATION:-24h}
       JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:-falcon-ai-refresh-secret}
-      JWT_REFRESH_EXPIRATION: 7d
+      JWT_REFRESH_EXPIRATION: ${JWT_REFRESH_EXPIRATION:-7d}
+      CORS_ORIGIN: ${AUTH_CORS_ORIGIN:-http://${APP_HOST:-localhost}:12001}
+      OIDC_MANDATORY: ${OIDC_MANDATORY:-true}
+      OIDC_ISSUER: ${OIDC_ISSUER:-http://keycloak:8080/realms/falcon}
+      OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:-falcon-web}
+      OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:-falcon-oidc-client-secret}
+      OIDC_CALLBACK_URL: ${OIDC_CALLBACK_URL:-${PUBLIC_GATEWAY_URL}/api/auth/oidc/callback}
+      OIDC_FRONTEND_URL: ${OIDC_FRONTEND_URL:-http://${APP_HOST:-localhost}:12001}
+      OIDC_SCOPES: ${OIDC_SCOPES:-openid email profile}
+      OIDC_AUTHORIZATION_URL: ${OIDC_AUTHORIZATION_URL:-http://${APP_HOST:-localhost}:12080/realms/falcon/protocol/openid-connect/auth}
+      OIDC_TOKEN_URL: ${OIDC_TOKEN_URL:-http://keycloak:8080/realms/falcon/protocol/openid-connect/token}
+      OIDC_JWKS_URI: ${OIDC_JWKS_URI:-http://keycloak:8080/realms/falcon/protocol/openid-connect/certs}
       PORT: 3001
       NODE_ENV: production
       NODE_OPTIONS: --max-old-space-size=512
+    depends_on:
+      keycloak:
+        condition: service_started
     healthcheck:
       interval: 30s
       timeout: 10s
@@ -286,6 +300,45 @@ services:
           cpus: '1'
         reservations:
           memory: 128M
+          cpus: '0.25'
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '3'
+    networks:
+    - falcon-net
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.0
+    container_name: falcon-keycloak
+    restart: unless-stopped
+    command: start-dev --import-realm
+    ports:
+    - 12080:8080
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN_USER:-admin}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-admin}
+      KC_HTTP_ENABLED: 'true'
+      KC_HOSTNAME_STRICT: 'false'
+      KC_HOSTNAME: ${KEYCLOAK_HOST:-localhost}
+      KC_HOSTNAME_PORT: ${KEYCLOAK_HOST_PORT:-12080}
+    volumes:
+    - ./infra/keycloak/realm-falcon.json:/opt/keycloak/data/import/realm-falcon.json:ro
+    healthcheck:
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 60s
+      test:
+      - CMD-SHELL
+      - exec 3<>/dev/tcp/127.0.0.1/8080
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '1'
+        reservations:
+          memory: 256M
           cpus: '0.25'
     logging:
       driver: json-file

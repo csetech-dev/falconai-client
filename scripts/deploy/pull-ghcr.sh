@@ -29,6 +29,7 @@ ENV_ARGS=()
 if [[ -f "${ENV_FILE}" ]]; then
   ENV_ARGS=(--env-file "${ENV_FILE}")
   load_env_file "${ENV_FILE}"
+  resolve_deploy_env
 fi
 
 [[ -n "${GHCR_IMAGE_PREFIX:-}" ]] || die "GHCR_IMAGE_PREFIX is not set (e.g. ghcr.io/your-org/falconai)"

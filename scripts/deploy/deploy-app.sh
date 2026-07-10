@@ -36,7 +36,7 @@ if [[ "${USE_GHCR}" == "1" ]]; then
 fi
 
 load_env_file "${ENV_FILE}"
-resolve_storage_host
+resolve_deploy_env
 
 if [[ -z "${COMPOSE_PROFILES:-}" ]] || [[ "${COMPOSE_PROFILES}" != *scrapers* ]]; then
   warn "COMPOSE_PROFILES does not include 'scrapers' — worker-news, worker-fb, worker-linkedin, etc. will NOT start."
@@ -45,7 +45,7 @@ fi
 
 [[ -n "${POSTGRES_HOST:-}" ]] || die "POSTGRES_HOST or STORAGE_SERVER_IP must be set in .env.app"
 [[ -n "${MINIO_ENDPOINT:-}" ]] || die "MINIO_ENDPOINT or STORAGE_SERVER_IP must be set in .env.app"
-[[ -n "${PUBLIC_GATEWAY_URL:-}" ]] || die "PUBLIC_GATEWAY_URL must be set in .env.app"
+[[ -n "${PUBLIC_GATEWAY_URL:-}" ]] || die "PUBLIC_GATEWAY_URL or APP_HOST must be set in .env.app"
 
 warn_if_default_secret "POSTGRES_PASSWORD" "${POSTGRES_PASSWORD:-}"
 warn_if_default_secret "MINIO_SECRET_KEY" "${MINIO_SECRET_KEY:-}"
