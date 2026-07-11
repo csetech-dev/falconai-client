@@ -34,6 +34,63 @@ realm_exists() {
   kcadm get "realms/falcon" >/dev/null 2>&1
 }
 
+ensure_realm_file() {
+  if [[ -f "${REALM_FILE}" ]]; then
+    return 0
+  fi
+
+  if [[ -d "${REALM_FILE}" ]]; then
+    echo "WARNING: ${REALM_FILE} is a directory (Docker bind-mount bug when the file was missing)." >&2
+    for nested in "${REALM_FILE}/realm-falcon.json" "${REALM_FILE}/realm.json"; do
+      if [[ -f "${nested}" ]]; then
+        local tmp="${REALM_FILE}.repair.$$"
+        cp "${nested}" "${tmp}"
+        rm -rf "${REALM_FILE}"
+        mv "${tmp}" "${REALM_FILE}"
+        echo "Repaired mount path: ${REALM_FILE} is now a regular file."
+        return 0
+      fi
+    done
+    rm -rf "${REALM_FILE}"
+    echo "Removed mistaken directory ${REALM_FILE}." >&2
+  fi
+
+  echo "Missing realm file: ${REALM_FILE}" >&2
+  echo "Re-pack the client bundle or copy infra/keycloak/realm-falcon.json from the vendor repo, then re-run." >&2
+  exit 1
+}
+
+import_via_kcadm() {
+  local import_err
+  docker cp "${REALM_FILE}" "${KC_CONTAINER}:/tmp/realm-falcon.json"
+  if import_err="$(kcadm create realms -f /tmp/realm-falcon.json 2>&1)"; then
+    echo "Realm falcon imported via kcadm."
+    return 0
+  fi
+  echo "kcadm create realms failed: ${import_err}" >&2
+  return 1
+}
+
+recreate_keycloak() {
+  ensure_realm_file
+  if [[ ! -f "${REALM_FILE}" ]]; then
+    echo "Cannot recreate Keycloak: ${REALM_FILE} must be a regular file." >&2
+    exit 1
+  fi
+
+  echo "Recreating Keycloak so --import-realm loads ${REALM_FILE} ..."
+  docker compose "${COMPOSE_ARGS[@]}" up -d --force-recreate keycloak
+
+  echo "Waiting for Keycloak to start ..."
+  local attempt
+  for attempt in $(seq 1 30); do
+    if docker exec "${KC_CONTAINER}" sh -c 'exec 3<>/dev/tcp/127.0.0.1/8080' 2>/dev/null; then
+      break
+    fi
+    sleep 2
+  done
+}
+
 echo "Checking Keycloak realm falcon ..."
 
 if ! docker ps --format '{{.Names}}' | grep -qx "${KC_CONTAINER}"; then
@@ -41,6 +98,8 @@ if ! docker ps --format '{{.Names}}' | grep -qx "${KC_CONTAINER}"; then
   echo "  cd ${ROOT_DIR} && make deploy-ghcr" >&2
   exit 1
 fi
+
+ensure_realm_file
 
 kcadm config credentials \
   --server "${KC_BASE}" \
@@ -53,26 +112,13 @@ if realm_exists; then
   exit 0
 fi
 
-if [[ ! -f "${REALM_FILE}" ]]; then
-  echo "Missing ${REALM_FILE}" >&2
-  echo "Re-pack the client bundle from the vendor repo (includes infra/keycloak/realm-falcon.json) or copy that file manually." >&2
-  exit 1
-fi
-
 echo "Realm falcon not found — importing from ${REALM_FILE} ..."
 
-docker cp "${REALM_FILE}" "${KC_CONTAINER}:/tmp/realm-falcon.json"
-
-if kcadm create realms -f /tmp/realm-falcon.json 2>/dev/null; then
-  echo "Realm falcon imported via kcadm."
+if import_via_kcadm && realm_exists; then
   exit 0
 fi
 
-echo "kcadm import failed — recreating Keycloak with realm mount ..."
-docker compose "${COMPOSE_ARGS[@]}" up -d --force-recreate keycloak
-
-echo "Waiting for Keycloak to start ..."
-sleep 15
+recreate_keycloak
 
 kcadm config credentials \
   --server "${KC_BASE}" \
@@ -86,6 +132,6 @@ if realm_exists; then
 fi
 
 echo "Realm falcon still missing after recreate." >&2
-echo "Check: ls -la ${REALM_FILE}" >&2
+echo "Check file type: ls -la ${REALM_FILE}" >&2
 echo "Check Keycloak logs: docker logs ${KC_CONTAINER} --tail 80" >&2
 exit 1

@@ -56,6 +56,10 @@ if [[ ! -f "${NGINX_CONF}" ]]; then
 fi
 
 REALM_JSON="${ROOT_DIR}/infra/keycloak/realm-falcon.json"
+if [[ -d "${REALM_JSON}" ]]; then
+  warn "Removing mistaken directory (bind-mount placeholder): ${REALM_JSON}"
+  rm -rf "${REALM_JSON}"
+fi
 if [[ ! -f "${REALM_JSON}" ]]; then
   echo "Missing ${REALM_JSON}. Re-pack the client bundle (includes Keycloak realm import)." >&2
   exit 1
