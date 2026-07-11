@@ -23,5 +23,10 @@ App host:
 Upgrade later:
   cd /opt/falconai-client && make deploy-ghcr
 
+Keycloak / Settings users (OIDC server mode):
+  bash scripts/reset-keycloak-falcon-password.sh
+  bash scripts/provision-keycloak-falcon-users.sh
+  bash scripts/test-keycloak-password-grant.sh <email> '<password>'
+
 Full guide: docs/GHCR_DEPLOY.md (in vendor repo)
 Grant client GitHub user read:packages on GHCR packages.
