@@ -55,15 +55,33 @@ if [[ ! -f "${NGINX_CONF}" ]]; then
   exit 1
 fi
 
-REALM_JSON="${ROOT_DIR}/infra/keycloak/realm-falcon.json"
-if [[ -d "${REALM_JSON}" ]]; then
-  warn "Removing mistaken directory (bind-mount placeholder): ${REALM_JSON}"
-  rm -rf "${REALM_JSON}"
-fi
-if [[ ! -f "${REALM_JSON}" ]]; then
-  echo "Missing ${REALM_JSON}. Re-pack the client bundle (includes Keycloak realm import)." >&2
+ensure_keycloak_realm_file() {
+  local realm_json="${ROOT_DIR}/infra/keycloak/realm-falcon.json"
+  local fallback="${ROOT_DIR}/scripts/realm-falcon.json"
+
+  if [[ -d "${realm_json}" ]]; then
+    warn "Removing mistaken directory (bind-mount placeholder): ${realm_json}"
+    rm -rf "${realm_json}"
+  fi
+
+  if [[ -f "${realm_json}" ]]; then
+    return 0
+  fi
+
+  if [[ -f "${fallback}" ]]; then
+    mkdir -p "$(dirname "${realm_json}")"
+    cp "${fallback}" "${realm_json}"
+    log "Installed ${realm_json} from scripts/realm-falcon.json"
+    return 0
+  fi
+
+  echo "Missing Keycloak realm file: ${realm_json}" >&2
+  echo "Re-pack the client bundle, or copy infra/keycloak/realm-falcon.json from the vendor repo." >&2
+  echo "Quick fix: mkdir -p infra/keycloak && scp realm-falcon.json root@app1:/opt/falconai-client/infra/keycloak/" >&2
   exit 1
-fi
+}
+
+ensure_keycloak_realm_file
 
 mkdir -p "${ROOT_DIR}/.deploy"
 

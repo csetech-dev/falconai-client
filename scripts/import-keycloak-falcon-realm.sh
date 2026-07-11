@@ -15,6 +15,7 @@ KC_ADMIN="${KEYCLOAK_ADMIN_USER:-admin}"
 KC_ADMIN_PASS="${KEYCLOAK_ADMIN_PASSWORD:-admin}"
 KC_RELATIVE_PATH="${KEYCLOAK_HTTP_RELATIVE_PATH:-/}"
 REALM_FILE="${ROOT_DIR}/infra/keycloak/realm-falcon.json"
+REALM_FALLBACK="${ROOT_DIR}/scripts/realm-falcon.json"
 COMPOSE_ARGS=(--env-file "${ROOT_DIR}/.env.app" -f "${ROOT_DIR}/docker-compose.app.yml")
 if [[ -f "${ROOT_DIR}/docker-compose.ghcr.yml" ]]; then
   COMPOSE_ARGS+=(-f "${ROOT_DIR}/docker-compose.ghcr.yml")
@@ -35,10 +36,6 @@ realm_exists() {
 }
 
 ensure_realm_file() {
-  if [[ -f "${REALM_FILE}" ]]; then
-    return 0
-  fi
-
   if [[ -d "${REALM_FILE}" ]]; then
     echo "WARNING: ${REALM_FILE} is a directory (Docker bind-mount bug when the file was missing)." >&2
     for nested in "${REALM_FILE}/realm-falcon.json" "${REALM_FILE}/realm.json"; do
@@ -53,6 +50,17 @@ ensure_realm_file() {
     done
     rm -rf "${REALM_FILE}"
     echo "Removed mistaken directory ${REALM_FILE}." >&2
+  fi
+
+  if [[ -f "${REALM_FILE}" ]]; then
+    return 0
+  fi
+
+  if [[ -f "${REALM_FALLBACK}" ]]; then
+    mkdir -p "$(dirname "${REALM_FILE}")"
+    cp "${REALM_FALLBACK}" "${REALM_FILE}"
+    echo "Installed ${REALM_FILE} from scripts/realm-falcon.json"
+    return 0
   fi
 
   echo "Missing realm file: ${REALM_FILE}" >&2
