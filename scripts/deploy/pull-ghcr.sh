@@ -27,7 +27,8 @@ cd "${ROOT_DIR}"
 
 ENV_ARGS=()
 if [[ -f "${ENV_FILE}" ]]; then
-  ENV_ARGS=(--env-file "${ENV_FILE}")
+  write_deploy_runtime_env_file "${ENV_FILE}"
+  ENV_ARGS=(--env-file "${ENV_FILE}" --env-file "${ROOT_DIR}/.env.app.runtime")
   load_env_file "${ENV_FILE}"
   resolve_deploy_env
 fi

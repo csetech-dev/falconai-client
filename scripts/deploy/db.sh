@@ -77,10 +77,9 @@ require_running_core() {
 
 compose_db_args() {
   [[ -f "${ENV_FILE}" ]] || die "Missing ${ENV_FILE}. Run: make init-app"
-  load_env_file "${ENV_FILE}"
-  resolve_deploy_env
+  write_deploy_runtime_env_file "${ENV_FILE}"
 
-  COMPOSE_DB_ARGS=(--env-file "${ENV_FILE}" -f "${APP_COMPOSE}")
+  COMPOSE_DB_ARGS=(--env-file "${ENV_FILE}" --env-file "${ROOT_DIR}/.env.app.runtime" -f "${APP_COMPOSE}")
   if [[ "${FALCON_DEPLOY_MODE:-}" == "ghcr" ]] || [[ -n "${GHCR_IMAGE_PREFIX:-}" ]]; then
     COMPOSE_DB_ARGS+=(-f "${ROOT_DIR}/docker-compose.ghcr.yml")
   fi

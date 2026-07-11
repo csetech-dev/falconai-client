@@ -2346,6 +2346,7 @@ model ProfileFeedback {
 enum VideoKind {
   GENERAL
   TALK_SHOW
+  LIVE
 }
 
 enum VideoIngestionMethod {
@@ -2465,6 +2466,7 @@ model Video {
   speakers       VideoSpeaker[]
   segments       VideoSegment[]
   topics         VideoTopic[]
+  liveRecordTopics LiveRecordTopic[]
 
   @@unique([campaignId, externalVideoId], map: "yt_campaign_video_unique")
   @@index([campaignId], map: "yt_campaign_id_idx")
@@ -2989,4 +2991,52 @@ model WildSearchBookmark {
   @@index([url], map: "wsb_url_idx")
   @@unique([campaignId, url, title], map: "wsb_campaign_url_title_key")
   @@map("wild_search_bookmarks")
+}
+
+/// Live stream recording channel — stores a YouTube live URL and its topics.
+/// Each topic has its own schedule (start/end/chunk) and produces a separate
+/// video in the `videos` table after recording completes.
+model LiveRecordChannel {
+  id        String   @id @default(cuid())
+  name      String
+  url       String
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  topics LiveRecordTopic[]
+
+  @@map("live_record_channels")
+}
+
+/// One topic within a live recording channel. Each topic is recorded as a
+/// separate segment and saved as its own row in the `videos` table.
+model LiveRecordTopic {
+  id            String   @id @default(cuid())
+  channelId     String   @map("channel_id")
+  channel       LiveRecordChannel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  topicName     String   @map("topic_name")
+  startTime     String   @map("start_time")
+  endTime       String   @map("end_time")
+  chunkSeconds  Int      @default(30) @map("chunk_seconds")
+  /// Schedule type: ONE_TIME | RECURRING_DAILY
+  scheduleType  String   @default("ONE_TIME") @map("schedule_type")
+  /// Date string (YYYY-MM-DD) of the last recording start for recurring topics
+  lastRunDate   String?  @map("last_run_date")
+  /// Recording status: PENDING | RECORDING | COMPLETED | FAILED
+  status        String   @default("PENDING")
+  /// Worker-video job ID for polling progress
+  jobId         String?  @map("job_id")
+  /// Progress percent 0-100
+  percent       Int      @default(0)
+  /// Status message from the worker
+  message       String?
+  /// The video row created when recording completes
+  videoId       String?  @map("video_id")
+  video         Video?   @relation(fields: [videoId], references: [id], onDelete: SetNull)
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  @@index([channelId], map: "lrt_channel_id_idx")
+  @@index([status], map: "lrt_status_idx")
+  @@map("live_record_topics")
 }
