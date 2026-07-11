@@ -1,0 +1,81 @@
+{
+  "realm": "falcon",
+  "enabled": true,
+  "sslRequired": "none",
+  "registrationAllowed": false,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "resetPasswordAllowed": false,
+  "editUsernameAllowed": false,
+  "bruteForceProtected": true,
+  "roles": {
+    "realm": [
+      {
+        "name": "ADMIN",
+        "description": "Falcon administrator — full access"
+      },
+      {
+        "name": "USER",
+        "description": "Falcon standard user"
+      },
+      {
+        "name": "TECHNICAL",
+        "description": "Falcon technical operator"
+      },
+      {
+        "name": "MODERATOR",
+        "description": "Falcon moderator"
+      }
+    ]
+  },
+  "clients": [
+    {
+      "clientId": "falcon-web",
+      "name": "FalconAI Web",
+      "enabled": true,
+      "publicClient": false,
+      "secret": "falcon-oidc-client-secret",
+      "redirectUris": [
+        "http://localhost:12006/api/auth/oidc/callback",
+        "http://127.0.0.1:12006/api/auth/oidc/callback",
+        "https://app2.csetech.diu.edu.bd/api/auth/oidc/callback"
+      ],
+      "webOrigins": [
+        "http://localhost:12001",
+        "http://127.0.0.1:12001",
+        "https://app2.csetech.diu.edu.bd"
+      ],
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": true,
+      "serviceAccountsEnabled": false,
+      "protocol": "openid-connect",
+      "fullScopeAllowed": true,
+      "defaultClientScopes": [
+        "web-origins",
+        "acr",
+        "profile",
+        "roles",
+        "basic",
+        "email"
+      ]
+    }
+  ],
+  "users": [
+    {
+      "username": "admin@falconai.com",
+      "email": "admin@falconai.com",
+      "firstName": "Falcon",
+      "lastName": "Admin",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "Admin123!",
+          "temporary": false
+        }
+      ],
+      "realmRoles": ["ADMIN", "USER", "default-roles-falcon"]
+    }
+  ]
+}

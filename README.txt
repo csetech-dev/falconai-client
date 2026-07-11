@@ -24,6 +24,7 @@ Upgrade later:
   cd /opt/falconai-client && make deploy-ghcr
 
 Keycloak / Settings users (OIDC server mode):
+  bash scripts/import-keycloak-falcon-realm.sh
   bash scripts/reset-keycloak-falcon-password.sh
   bash scripts/provision-keycloak-falcon-users.sh
   bash scripts/test-keycloak-password-grant.sh <email> '<password>'

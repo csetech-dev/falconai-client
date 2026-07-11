@@ -55,6 +55,12 @@ if [[ ! -f "${NGINX_CONF}" ]]; then
   exit 1
 fi
 
+REALM_JSON="${ROOT_DIR}/infra/keycloak/realm-falcon.json"
+if [[ ! -f "${REALM_JSON}" ]]; then
+  echo "Missing ${REALM_JSON}. Re-pack the client bundle (includes Keycloak realm import)." >&2
+  exit 1
+fi
+
 mkdir -p "${ROOT_DIR}/.deploy"
 
 ensure_file "${ROOT_DIR}/apps/scrapers/worker-fb/cookies.json"

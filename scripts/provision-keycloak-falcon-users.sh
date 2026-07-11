@@ -140,6 +140,15 @@ kcadm config credentials \
   --user "${KC_ADMIN}" \
   --password "${KC_ADMIN_PASS}"
 
+if ! kcadm get "realms/falcon" >/dev/null 2>&1; then
+  bash "$(dirname "$0")/import-keycloak-falcon-realm.sh"
+  kcadm config credentials \
+    --server "${KC_BASE}" \
+    --realm master \
+    --user "${KC_ADMIN}" \
+    --password "${KC_ADMIN_PASS}"
+fi
+
 mapfile -t rows < <(query_users || true)
 
 if [[ "${#rows[@]}" -eq 0 || -z "${rows[0]}" ]]; then

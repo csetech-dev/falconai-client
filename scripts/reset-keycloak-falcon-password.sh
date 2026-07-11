@@ -54,6 +54,16 @@ kcadm config credentials \
   --user "${KC_ADMIN}" \
   --password "${KC_ADMIN_PASS}"
 
+if ! kcadm get "realms/falcon" >/dev/null 2>&1; then
+  echo "Realm falcon not found — running import helper ..."
+  bash "$(dirname "$0")/import-keycloak-falcon-realm.sh"
+  kcadm config credentials \
+    --server "${KC_BASE}" \
+    --realm master \
+    --user "${KC_ADMIN}" \
+    --password "${KC_ADMIN_PASS}"
+fi
+
 echo "Users in realm falcon:"
 kcadm get users -r falcon --fields id,username,email,enabled || true
 
