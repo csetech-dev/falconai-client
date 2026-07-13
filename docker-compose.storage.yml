@@ -9,9 +9,13 @@ services:
     image: minio/minio:latest
     container_name: falcon-minio
     restart: unless-stopped
-    # Ports are NOT published on the host — MinIO is reachable only inside
-    # falcon-net and, from the app host, exclusively through the WireGuard tunnel
-    # (falcon-wg-storage DNATs 12004->9000, 12015->9001 to the static IP below).
+    # STORAGE_BIND_IP is set by the deploy script from WIREGUARD_ENABLED:
+    #   tunnel ON  -> 127.0.0.1 (not public; app reaches MinIO via the tunnel /
+    #                 falcon-wg-storage DNAT to the static IP below)
+    #   tunnel OFF -> 0.0.0.0   (published publicly; app connects directly)
+    ports:
+    - ${STORAGE_BIND_IP:-127.0.0.1}:${MINIO_API_PORT:-12004}:9000
+    - ${STORAGE_BIND_IP:-127.0.0.1}:${MINIO_CONSOLE_PORT:-12015}:9001
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
@@ -53,9 +57,9 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
       POSTGRES_INITDB_ARGS: --data-checksums
-    # Ports are NOT published on the host — Postgres is reachable only inside
-    # falcon-net and, from the app host, exclusively through the WireGuard tunnel
-    # (falcon-wg-storage DNATs 12002->5432 to the static IP below).
+    # STORAGE_BIND_IP: 127.0.0.1 when the tunnel is ON (not public), 0.0.0.0 when OFF.
+    ports:
+    - ${STORAGE_BIND_IP:-127.0.0.1}:${POSTGRES_PORT:-12002}:5432
     volumes:
     - postgres_data:/var/lib/postgresql
     healthcheck:
@@ -113,6 +117,10 @@ services:
     image: linuxserver/wireguard:latest
     container_name: falcon-wg-storage
     restart: unless-stopped
+    # Only started when the deploy script activates the "wireguard" profile
+    # (WIREGUARD_ENABLED=true, the default).
+    profiles:
+    - wireguard
     cap_add:
     - NET_ADMIN
     - SYS_MODULE

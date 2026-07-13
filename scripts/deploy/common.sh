@@ -266,6 +266,25 @@ resolve_storage_host() {
   fi
 }
 
+# Returns 0 when the WireGuard tunnel is enabled (the default), 1 when the
+# operator has explicitly turned it off via WIREGUARD_ENABLED in the env file.
+wireguard_enabled() {
+  case "${WIREGUARD_ENABLED:-true}" in
+    false|FALSE|False|0|no|off) return 1 ;;
+    *) return 0 ;;
+  esac
+}
+
+# Append a profile to COMPOSE_PROFILES (idempotent, comma-separated).
+add_compose_profile() {
+  local p="$1"
+  if [[ -z "${COMPOSE_PROFILES:-}" ]]; then
+    export COMPOSE_PROFILES="${p}"
+  elif [[ ",${COMPOSE_PROFILES}," != *",${p},"* ]]; then
+    export COMPOSE_PROFILES="${COMPOSE_PROFILES},${p}"
+  fi
+}
+
 # Ensure the WireGuard tunnel config exists on this host before deploying.
 # The app<->storage link is encrypted and the storage ports are not published
 # publicly, so a missing/placeholder wg0.conf means the tunnel can't come up.

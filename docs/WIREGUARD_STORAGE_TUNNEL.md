@@ -186,6 +186,24 @@ curl -fsS "http://$STORAGE_SERVER_IP:12004/minio/health/live" # MinIO over the t
 tcpdump flags: `-n` no DNS · `-i` interface · `-X` hex+ASCII payload ·
 `-c N` stop after N packets · `-w cap.pcap` save for Wireshark.
 
+## Turning the tunnel off
+
+The tunnel is on by default. To run without it (direct plaintext connection to
+storage — e.g. same trusted host/LAN, or debugging), set in **both** env files:
+
+```env
+WIREGUARD_ENABLED=false
+```
+
+With the tunnel off, the deploy scripts:
+- publish Postgres/MinIO publicly (`0.0.0.0`) on the storage host,
+- skip the WireGuard sidecars, the config guard, and the handshake wait,
+- connect the app directly to storage.
+
+In this mode `STORAGE_SERVER_IP` must be the **storage host's IP** (its original
+meaning) — not the app host's own IP. No `wg0.conf` is required. Switch back by
+setting `WIREGUARD_ENABLED=true` (or removing the line) and redeploying both stacks.
+
 ## Operations
 
 - **Restart tunnel:** `docker restart falcon-wg-app` / `falcon-wg-storage`.

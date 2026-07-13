@@ -57,11 +57,6 @@ MINIO_HOST="${MINIO_ENDPOINT%%:*}"
 MINIO_PORT="${MINIO_ENDPOINT##*:}"
 [[ "${MINIO_HOST}" != "${MINIO_PORT}" ]] || die "MINIO_ENDPOINT must be host:port (got: ${MINIO_ENDPOINT})"
 
-# Storage is reached over the encrypted WireGuard tunnel (falcon-wg-app sidecar).
-# Verify the tunnel config exists before anything else, so a missing setup fails
-# with clear guidance instead of a connectivity timeout.
-require_wireguard_conf app
-
 # Assemble compose args early — the tunnel sidecar must start before the preflight.
 if [[ "${USE_GHCR}" == "1" ]]; then
   [[ -n "${GHCR_IMAGE_PREFIX:-}" ]] || die "GHCR mode requires GHCR_IMAGE_PREFIX in .env.app"
@@ -71,17 +66,28 @@ if [[ "${USE_GHCR}" == "1" ]]; then
   COMPOSE_ARGS+=(-f "${ROOT_DIR}/docker-compose.ghcr.yml")
 fi
 
-# The WireGuard sidecar republishes the storage ports on this host (bound to
-# STORAGE_SERVER_IP) and carries them over the encrypted tunnel. It MUST be up
-# before the preflight and before the app services, or storage is unreachable.
-log "Starting WireGuard tunnel (falcon-wg-app)..."
-"${COMPOSE[@]}" "${COMPOSE_ARGS[@]}" up -d wireguard
-wait_for_wireguard_peer falcon-wg-app 20 || \
-  warn "WireGuard handshake not confirmed yet — the preflight below will wait for the tunnel."
+if wireguard_enabled; then
+  # Storage is reached over the encrypted tunnel. Verify the config exists, then
+  # bring up the falcon-wg-app sidecar (which republishes the storage ports on
+  # this host, bound to STORAGE_SERVER_IP) BEFORE the preflight — or storage is
+  # unreachable. STORAGE_SERVER_IP must be THIS app host's own LAN IP.
+  require_wireguard_conf app
+  add_compose_profile wireguard
+  log "Starting WireGuard tunnel (falcon-wg-app)..."
+  "${COMPOSE[@]}" "${COMPOSE_ARGS[@]}" up -d wireguard
+  wait_for_wireguard_peer falcon-wg-app 20 || \
+    warn "WireGuard handshake not confirmed yet — the preflight below will wait for the tunnel."
+  log "Preflight: checking storage connectivity over the tunnel..."
+else
+  # Tunnel OFF: connect directly to the storage host (plaintext).
+  # STORAGE_SERVER_IP must be the STORAGE host's IP in this mode.
+  warn "WireGuard tunnel DISABLED (WIREGUARD_ENABLED=false) — connecting to storage in PLAINTEXT."
+  warn "STORAGE_SERVER_IP must be the STORAGE host's IP (not this host) when the tunnel is off."
+  log "Preflight: checking storage connectivity (direct)..."
+fi
 
-log "Preflight: checking storage connectivity over the tunnel..."
-wait_for_tcp "${POSTGRES_HOST}" "${POSTGRES_PORT:-5432}" 20
-wait_for_http "http://${MINIO_HOST}:${MINIO_PORT}/minio/health/live" 20
+wait_for_tcp "${POSTGRES_HOST}" "${POSTGRES_PORT:-5432}" 60
+wait_for_http "http://${MINIO_HOST}:${MINIO_PORT}/minio/health/live" 60
 
 export FALCON_DEPLOY_DIR="${FALCON_DEPLOY_DIR:-${ROOT_DIR}}"
 bash "${SCRIPT_DIR}/init-client-data.sh"

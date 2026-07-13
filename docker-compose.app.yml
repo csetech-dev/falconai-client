@@ -97,6 +97,10 @@ services:
     image: linuxserver/wireguard:latest
     container_name: falcon-wg-app
     restart: unless-stopped
+    # Only started when the deploy script activates the "wireguard" profile
+    # (WIREGUARD_ENABLED=true, the default).
+    profiles:
+    - wireguard
     cap_add:
     - NET_ADMIN
     - SYS_MODULE
