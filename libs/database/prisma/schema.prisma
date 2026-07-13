@@ -67,9 +67,8 @@ enum ScrapePlatform {
   TWITTER
   FACEBOOK
   LINKEDIN
+  WEB_WORKER
   NEWS
-  REDDIT
-  INSTAGRAM
   TELEGRAM
   VIDEO
   YOUTUBE
@@ -284,6 +283,8 @@ model User {
   reportCollaborations ReportCollaborator[]
   notifications       UserNotification[]
   permissions         UserPermission[]
+
+  reportBookmarks      ReportBookmark[]
 
   @@map("users")
 }
@@ -1127,6 +1128,7 @@ model NewsSource {
 enum NewsSourceType {
   main_stream
   local_stream
+  international_stream
 }
 
 // Group of news papers (Print Media)
@@ -2510,15 +2512,17 @@ model VideoTopicEvidence {
 }
 
 model VideoAiJob {
-  id            String           @id @default(cuid())
-  videoId       String           @map("video_id")
-  video         Video            @relation(fields: [videoId], references: [id], onDelete: Cascade)
-  status        VideoAiJobStatus @default(QUEUED)
-  externalJobId String?          @unique @map("external_job_id")
-  errorMessage  String?          @map("error_message") @db.Text
-  requestedAt   DateTime         @default(now()) @map("requested_at")
-  startedAt     DateTime?        @map("started_at")
-  completedAt   DateTime?        @map("completed_at")
+  id             String           @id @default(cuid())
+  videoId        String           @map("video_id")
+  video          Video            @relation(fields: [videoId], references: [id], onDelete: Cascade)
+  status         VideoAiJobStatus @default(QUEUED)
+  externalJobId  String?          @unique @map("external_job_id")
+  errorMessage   String?          @map("error_message") @db.Text
+  currentStep    String?          @map("current_step")
+  progressPercent Int?            @map("progress_percent")
+  requestedAt    DateTime         @default(now()) @map("requested_at")
+  startedAt      DateTime?        @map("started_at")
+  completedAt    DateTime?        @map("completed_at")
 
   @@index([videoId, status])
   @@map("video_ai_jobs")
@@ -2676,11 +2680,19 @@ model Report {
   pageMarginBottomCm  Float                 @default(1.0)
   pageMarginLeftCm    Float                 @default(1.0)
   currentVersionId    String?
+  /// Persisted report-level date filter (YYYY-MM-DD). Used by data
+  /// blocks as the default date range when resolving live data.
+  reportDateFrom      String?
+  reportDateTo        String?
   publishedAt         DateTime?
   /// Optional cron expression (e.g. "0 8 * * 0"). When set, a BullMQ
   /// repeatable job re-publishes the report on this schedule.
   cronSchedule     String?
   scheduleLastFiredAt DateTime?
+  /// Soft-delete timestamp. When set, the report is in the trash bin
+  /// and excluded from normal list/get queries. Permanently deleted
+  /// via a separate hard-delete endpoint.
+  deletedAt        DateTime?
   createdAt        DateTime     @default(now())
   updatedAt        DateTime     @updatedAt
 
@@ -2694,6 +2706,7 @@ model Report {
 
   @@index([userId, status])
   @@index([templateId])
+  @@index([deletedAt])
   @@map("reports")
 }
 
@@ -2715,14 +2728,20 @@ model ReportVersion {
 }
 
 model ReportShareLink {
-  id         String                @id @default(cuid())
-  reportId   String
-  token      String                @unique @default(uuid())
-  visibility ReportShareVisibility @default(PUBLIC)
-  createdBy  String
-  expiresAt  DateTime?
-  revokedAt  DateTime?
-  createdAt  DateTime              @default(now())
+  id           String                @id @default(cuid())
+  reportId     String
+  token        String                @unique @default(uuid())
+  visibility   ReportShareVisibility @default(PUBLIC)
+  createdBy    String
+  expiresAt    DateTime?
+  revokedAt    DateTime?
+  createdAt    DateTime              @default(now())
+  /// bcrypt hash of an optional access password. When set, the share
+  /// endpoint requires a matching password in the X-Share-Password header.
+  passwordHash String?
+  /// Incremented each time the share link is successfully resolved.
+  viewCount    Int                   @default(0)
+  lastViewedAt DateTime?
 
   report Report @relation(fields: [reportId], references: [id], onDelete: Cascade)
 
@@ -2991,6 +3010,32 @@ model WildSearchBookmark {
   @@index([url], map: "wsb_url_idx")
   @@unique([campaignId, url, title], map: "wsb_campaign_url_title_key")
   @@map("wild_search_bookmarks")
+}
+
+// ============================================
+// REPORT BOOKMARKS (Report Cart)
+// ============================================
+
+/// A bookmarked news article or social post collected for report generation.
+/// One row per bookmarked item, scoped to the user who bookmarked it.
+model ReportBookmark {
+  id              String   @id @default(cuid())
+  userId          String   @map("user_id")
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// The original item ID (SocialPost.id or NewsArticle.id).
+  itemId          String   @map("item_id")
+
+  /// 'news' or 'social'.
+  itemType        String   @map("item_type")
+
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  @@unique([userId, itemId], map: "rb_user_item_key")
+  @@index([userId], map: "rb_user_id_idx")
+  @@index([createdAt], map: "rb_created_at_idx")
+  @@map("report_bookmarks")
 }
 
 /// Live stream recording channel — stores a YouTube live URL and its topics.

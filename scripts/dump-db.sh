@@ -5,8 +5,8 @@
 # Meant to run from any Ubuntu box that has Docker (e.g. an app/prod node) and
 # can reach the Postgres server over the network. The Postgres server lives in a
 # container reachable at <DB_HOST>:<DB_PORT>, so this script does NOT need psql /
-# pg_dump installed locally — it uses the postgres:16-alpine image via Docker
-# (same pattern as scripts/deploy/db.sh and sync-cloud-db-to-local.sh).
+# pg_dump installed locally — it uses a postgres:18 Docker image (must match the
+# storage server major version; see docker-compose.storage.yml pg18).
 #
 # On launch it ASKS for the database server IP (because that differs per host),
 # then dumps falcon_ai into a timestamped file under ./db-backups (override with
@@ -27,7 +27,7 @@
 #   DB_NAME       default falcon_ai
 #   OUT_DIR       default <repo>/db-backups
 #   FORMAT        custom (default, -> .dump, restore w/ pg_restore) | plain (-> .sql)
-#   PG_IMAGE      default postgres:16-alpine
+#   PG_IMAGE      default postgres:18 (must be >= server major version)
 #
 set -euo pipefail
 
@@ -37,7 +37,7 @@ DB_USER="${DB_USER:-postgres}"
 DB_PASSWORD="${DB_PASSWORD:-pass998!}"
 DB_NAME="${DB_NAME:-falcon_ai}"
 FORMAT="${FORMAT:-custom}"
-PG_IMAGE="${PG_IMAGE:-postgres:16-alpine}"
+PG_IMAGE="${PG_IMAGE:-postgres:18}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"

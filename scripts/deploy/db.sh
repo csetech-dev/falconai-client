@@ -132,7 +132,7 @@ run_psql() {
   log "psql → ${POSTGRES_HOST}:${POSTGRES_PORT:-5432}/falcon_ai"
   docker run --rm -i \
     -e "PGPASSWORD=${POSTGRES_PASSWORD:-postgres}" \
-    postgres:16-alpine \
+    postgres:18 \
     psql -h "${POSTGRES_HOST}" -p "${POSTGRES_PORT:-5432}" -U "${POSTGRES_USER:-postgres}" -d falcon_ai \
     "${args[@]}"
 }

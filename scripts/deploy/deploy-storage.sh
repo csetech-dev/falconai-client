@@ -19,6 +19,10 @@ load_env_file "${ENV_FILE}"
 warn_if_default_secret "POSTGRES_PASSWORD" "${POSTGRES_PASSWORD:-}"
 warn_if_default_secret "MINIO_ROOT_PASSWORD" "${MINIO_ROOT_PASSWORD:-}"
 
+# Postgres/MinIO are only reachable through the WireGuard tunnel (ports are not
+# published on the host). Require the tunnel config before bringing storage up.
+require_wireguard_conf storage
+
 log "Pulling storage images..."
 "${COMPOSE[@]}" --env-file "${ENV_FILE}" -f "${STORAGE_COMPOSE}" pull
 

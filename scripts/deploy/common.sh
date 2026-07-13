@@ -266,6 +266,31 @@ resolve_storage_host() {
   fi
 }
 
+# Ensure the WireGuard tunnel config exists on this host before deploying.
+# The app<->storage link is encrypted and the storage ports are not published
+# publicly, so a missing/placeholder wg0.conf means the tunnel can't come up.
+# Fail fast with actionable steps instead of a confusing preflight timeout.
+# Arg: role = "app" | "storage"
+require_wireguard_conf() {
+  local role="$1"
+  local conf="${ROOT_DIR}/infra/wireguard/${role}/wg0.conf"
+
+  if [[ ! -f "${conf}" ]]; then
+    die "WireGuard tunnel config not found: infra/wireguard/${role}/wg0.conf
+  The app<->storage link is encrypted; storage ports are not exposed publicly.
+  One-time setup on this host:
+    STORAGE_PUBLIC_IP=<storage-public-ip> bash scripts/gen-wireguard-keys.sh
+    -> save the '${role} host' block to infra/wireguard/${role}/wg0.conf here
+    -> save the peer block to infra/wireguard/<peer>/wg0.conf on the other host
+  See docs/WIREGUARD_STORAGE_TUNNEL.md"
+  fi
+
+  if grep -Eq '<[A-Z_]+>' "${conf}" 2>/dev/null; then
+    die "WireGuard config infra/wireguard/${role}/wg0.conf still has placeholder <...> values.
+  Fill in the keys (bash scripts/gen-wireguard-keys.sh) — see docs/WIREGUARD_STORAGE_TUNNEL.md"
+  fi
+}
+
 resolve_app_host() {
   if [[ -z "${APP_HOST:-}" && -n "${STORAGE_SERVER_IP:-}" ]]; then
     export APP_HOST="${STORAGE_SERVER_IP}"

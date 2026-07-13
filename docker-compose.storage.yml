@@ -9,9 +9,9 @@ services:
     image: minio/minio:latest
     container_name: falcon-minio
     restart: unless-stopped
-    ports:
-    - ${MINIO_API_PORT:-12004}:9000
-    - ${MINIO_CONSOLE_PORT:-12015}:9001
+    # Ports are NOT published on the host — MinIO is reachable only inside
+    # falcon-net and, from the app host, exclusively through the WireGuard tunnel
+    # (falcon-wg-storage DNATs 12004->9000, 12015->9001 to the static IP below).
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
@@ -42,7 +42,8 @@ services:
         max-size: 10m
         max-file: '3'
     networks:
-    - falcon-net
+      falcon-net:
+        ipv4_address: 172.29.0.11
   postgres:
     image: pgvector/pgvector:0.8.1-pg18
     container_name: falcon-postgres
@@ -52,8 +53,9 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
       POSTGRES_INITDB_ARGS: --data-checksums
-    ports:
-    - ${POSTGRES_PORT:-12002}:5432
+    # Ports are NOT published on the host — Postgres is reachable only inside
+    # falcon-net and, from the app host, exclusively through the WireGuard tunnel
+    # (falcon-wg-storage DNATs 12002->5432 to the static IP below).
     volumes:
     - postgres_data:/var/lib/postgresql
     healthcheck:
@@ -78,6 +80,7 @@ services:
       '
     networks:
       falcon-net:
+        ipv4_address: 172.29.0.10
         aliases:
         - postgres
     logging:
@@ -100,6 +103,43 @@ services:
 
       '
     restart: on-failure
+    networks:
+    - falcon-net
+  # WireGuard tunnel endpoint for encrypted app<->storage traffic.
+  # Terminates the tunnel at 10.9.0.1 and DNATs the storage ports arriving on
+  # wg0 to the Postgres/MinIO containers (static IPs above). See
+  # docs/WIREGUARD_STORAGE_TUNNEL.md. Config: ./infra/wireguard/storage/wg0.conf
+  wireguard:
+    image: linuxserver/wireguard:latest
+    container_name: falcon-wg-storage
+    restart: unless-stopped
+    cap_add:
+    - NET_ADMIN
+    - SYS_MODULE
+    sysctls:
+    - net.ipv4.ip_forward=1
+    - net.ipv4.conf.all.src_valid_mark=1
+    environment:
+      PUID: '1000'
+      PGID: '1000'
+      TZ: ${TZ:-UTC}
+    volumes:
+    - ./infra/wireguard/storage:/config/wg_confs
+    - /lib/modules:/lib/modules:ro
+    ports:
+    - ${WG_LISTEN_PORT:-51820}:51820/udp
+    healthcheck:
+      test:
+      - CMD-SHELL
+      - wg show wg0 >/dev/null 2>&1 || exit 1
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '3'
     networks:
     - falcon-net
 volumes:

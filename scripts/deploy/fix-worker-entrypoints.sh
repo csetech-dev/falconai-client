@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Fix worker-fb / worker-x crash: python api.py on bytecode-only GHCR images.
+# Fix lane workers crash: python api.py/app.py on bytecode-only GHCR images.
+# Recreates workers with run-py entrypoints (same pattern as worker-fb).
 # Safe to run on any GHCR client host.
 set -euo pipefail
 
@@ -17,15 +18,25 @@ bash "${SCRIPT_DIR}/init-client-data.sh"
 
 COMPOSE_ARGS=(--env-file "${ENV_FILE}" -f "${APP_COMPOSE}" -f "${ROOT_DIR}/docker-compose.ghcr.yml")
 
-log "Recreating worker-fb and worker-x with run-py entrypoints..."
-"${COMPOSE[@]}" "${COMPOSE_ARGS[@]}" pull worker-fb worker-x
-"${COMPOSE[@]}" "${COMPOSE_ARGS[@]}" up -d --no-build --force-recreate worker-fb worker-x
+WORKERS=(worker-fb worker-x worker-linkedin web-worker)
 
-log "worker-fb command:"
-docker inspect worker-fb --format '{{json .Config.Cmd}}' 2>/dev/null || true
+log "Recreating ${WORKERS[*]} with run-py entrypoints..."
+"${COMPOSE[@]}" "${COMPOSE_ARGS[@]}" pull "${WORKERS[@]}"
+"${COMPOSE[@]}" "${COMPOSE_ARGS[@]}" up -d --no-build --force-recreate "${WORKERS[@]}"
 
-log "worker-fb logs:"
-docker logs worker-fb --tail 15 2>&1 || true
+for w in "${WORKERS[@]}"; do
+  log "${w} command:"
+  docker inspect "${w}" --format '{{json .Config.Cmd}}' 2>/dev/null || true
+done
+
+log "worker-linkedin logs:"
+docker logs worker-linkedin --tail 15 2>&1 || true
+
+if docker exec worker-linkedin curl -fsS http://localhost:3011/ >/dev/null 2>&1; then
+  ok "worker-linkedin health check passed"
+else
+  warn "worker-linkedin health check failed — run: docker logs worker-linkedin --tail 50"
+fi
 
 if docker exec worker-fb curl -fsS http://localhost:3010/health >/dev/null 2>&1; then
   ok "worker-fb health check passed"

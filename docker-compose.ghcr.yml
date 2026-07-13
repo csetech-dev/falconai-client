@@ -35,7 +35,19 @@ x-worker-x-command: &worker-x-command
   command:
     - sh
     - -lc
-    - 'mkdir -p /app/x_chrome_profile && chown -R root:root /app/x_chrome_profile; Xvfb :99 -screen 0 1920x1080x24 -ac >/tmp/xvfb.log 2>&1 & while [ ! -S /tmp/.X11-unix/X99 ]; do sleep 0.2; done; export DISPLAY=:99; openbox --config-file /app/openbox-rc.xml >/tmp/openbox.log 2>&1 & x11vnc -display :99 -forever -shared -nopw -listen 0.0.0.0 -rfbport 5900 >/tmp/x11vnc.log 2>&1 & websockify --web=/usr/share/novnc/ 7900 localhost:5900 >/tmp/websockify.log 2>&1 & run-py app'
+    - 'mkdir -p /app/x_chrome_profile /app/lanes && chown -R root:root /app/x_chrome_profile; Xvfb :99 -screen 0 1920x1080x24 -ac >/tmp/xvfb.log 2>&1 & while [ ! -S /tmp/.X11-unix/X99 ]; do sleep 0.2; done; export DISPLAY=:99; openbox --config-file /app/openbox-rc.xml >/tmp/openbox.log 2>&1 & x11vnc -display :99 -forever -shared -nopw -listen 0.0.0.0 -rfbport 5900 >/tmp/x11vnc.log 2>&1 & websockify --web=/usr/share/novnc/ 7900 localhost:5900 >/tmp/websockify.log 2>&1 & run-py app'
+
+x-worker-linkedin-command: &worker-linkedin-command
+  command:
+    - sh
+    - -lc
+    - 'mkdir -p /app/linkedin_chrome_profile /app/lanes; Xvfb :99 -screen 0 1920x1080x24 -ac >/tmp/xvfb.log 2>&1 & while [ ! -S /tmp/.X11-unix/X99 ]; do sleep 0.2; done; export DISPLAY=:99; if command -v xset >/dev/null 2>&1; then xset s off -dpms s noblank; fi; openbox >/tmp/openbox.log 2>&1 & x11vnc -display :99 -forever -shared -nopw -noxdamage -xkb -repeat -listen 0.0.0.0 -rfbport 5900 >/tmp/x11vnc.log 2>&1 & websockify --web=/usr/share/novnc/ 7900 localhost:5900 >/tmp/websockify.log 2>&1 & if command -v xset >/dev/null 2>&1; then (while true; do DISPLAY=:99 xset s off -dpms s noblank >/dev/null 2>&1; sleep 30; done) & fi; run-py api'
+
+x-web-worker-command: &web-worker-command
+  command:
+    - sh
+    - -lc
+    - 'mkdir -p /app/.chrome-profile /app/lanes && chown -R root:root /app/.chrome-profile; Xvfb :99 -screen 0 1920x1080x24 -ac >/tmp/xvfb.log 2>&1 & while [ ! -S /tmp/.X11-unix/X99 ]; do sleep 0.2; done; export DISPLAY=:99; openbox --config-file /app/openbox-rc.xml >/tmp/openbox.log 2>&1 & x11vnc -display :99 -forever -shared -nopw -listen 0.0.0.0 -rfbport 5900 >/tmp/x11vnc.log 2>&1 & websockify --web=/usr/share/novnc/ 7900 localhost:5900 >/tmp/websockify.log 2>&1 & run-py api'
 
 services:
   proxy-rotator:
@@ -78,10 +90,33 @@ services:
   worker-fb:
     <<: [*ghcr-image, *worker-fb-command]
     image: ${GHCR_IMAGE_PREFIX}/worker-fb:${FALCON_IMAGE_TAG:-latest}
+    environment:
+      FB_MULTI_ACCOUNT_ENABLED: "true"
+      CORE_SERVICE_URL: http://falcon-core:4000
 
   worker-linkedin:
-    <<: *ghcr-image
+    <<: [*ghcr-image, *worker-linkedin-command]
     image: ${GHCR_IMAGE_PREFIX}/worker-linkedin:${FALCON_IMAGE_TAG:-latest}
+    environment:
+      LINKEDIN_MULTI_ACCOUNT_ENABLED: "true"
+      CORE_SERVICE_URL: http://falcon-core:4000
+      LINKEDIN_LANE_PLATFORM: LINKEDIN
+
+  worker-x:
+    <<: [*ghcr-image, *worker-x-command]
+    image: ${GHCR_IMAGE_PREFIX}/worker-x:${FALCON_IMAGE_TAG:-latest}
+    environment:
+      X_MULTI_ACCOUNT_ENABLED: "true"
+      CORE_SERVICE_URL: http://falcon-core:4000
+      X_LANE_PLATFORM: TWITTER
+
+  web-worker:
+    <<: [*ghcr-image, *web-worker-command]
+    image: ${GHCR_IMAGE_PREFIX}/web-worker:${FALCON_IMAGE_TAG:-latest}
+    environment:
+      WEB_WORKER_MULTI_ACCOUNT_ENABLED: "true"
+      CORE_SERVICE_URL: http://falcon-core:4000
+      WEB_WORKER_LANE_PLATFORM: WEB_WORKER
 
   worker-news:
     <<: *worker-news-image
@@ -107,10 +142,6 @@ services:
   worker-news-tv:
     <<: *worker-news-image
 
-  worker-x:
-    <<: [*ghcr-image, *worker-x-command]
-    image: ${GHCR_IMAGE_PREFIX}/worker-x:${FALCON_IMAGE_TAG:-latest}
-
   worker-telegram:
     <<: *ghcr-image
     image: ${GHCR_IMAGE_PREFIX}/worker-telegram:${FALCON_IMAGE_TAG:-latest}
@@ -118,10 +149,6 @@ services:
   worker-video:
     <<: *ghcr-image
     image: ${GHCR_IMAGE_PREFIX}/worker-video:${FALCON_IMAGE_TAG:-latest}
-
-  web-worker:
-    <<: *ghcr-image
-    image: ${GHCR_IMAGE_PREFIX}/web-worker:${FALCON_IMAGE_TAG:-latest}
 
   worker-image:
     <<: *ghcr-image

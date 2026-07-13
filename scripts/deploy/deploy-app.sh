@@ -57,6 +57,11 @@ MINIO_HOST="${MINIO_ENDPOINT%%:*}"
 MINIO_PORT="${MINIO_ENDPOINT##*:}"
 [[ "${MINIO_HOST}" != "${MINIO_PORT}" ]] || die "MINIO_ENDPOINT must be host:port (got: ${MINIO_ENDPOINT})"
 
+# Storage is reached over the encrypted WireGuard tunnel (falcon-wg-app sidecar).
+# Verify the tunnel config exists before the preflight, so a missing setup fails
+# with clear guidance instead of a 60s connectivity timeout.
+require_wireguard_conf app
+
 log "Preflight: checking remote storage connectivity..."
 wait_for_tcp "${POSTGRES_HOST}" "${POSTGRES_PORT:-5432}" 60
 wait_for_http "http://${MINIO_HOST}:${MINIO_PORT}/minio/health/live" 60

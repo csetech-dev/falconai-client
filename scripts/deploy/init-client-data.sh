@@ -90,8 +90,10 @@ ensure_dir  "${ROOT_DIR}/apps/scrapers/worker-fb/facebook_vnc_profile"
 ensure_dir  "${ROOT_DIR}/apps/scrapers/worker-fb/lanes"
 ensure_file "${ROOT_DIR}/apps/scrapers/worker-linkedin/cookies.json"
 ensure_dir  "${ROOT_DIR}/apps/scrapers/worker-linkedin/linkedin_chrome_profile"
+ensure_dir  "${ROOT_DIR}/apps/scrapers/worker-linkedin/lanes"
 ensure_dir  "${ROOT_DIR}/apps/scrapers/worker-news/outputs"
 ensure_dir  "${ROOT_DIR}/apps/scrapers/worker-x/x_chrome_profile"
+ensure_dir  "${ROOT_DIR}/apps/scrapers/worker-x/lanes"
 ensure_file "${ROOT_DIR}/apps/scrapers/worker-video/cookies.txt"
 TG_ENV="${ROOT_DIR}/apps/scrapers/worker-telegram/.env"
 TG_EXAMPLE="${ROOT_DIR}/apps/scrapers/worker-telegram/.env.example"
@@ -104,6 +106,7 @@ if [[ ! -f "${TG_ENV}" ]]; then
   fi
 fi
 ensure_dir  "${ROOT_DIR}/apps/web-worker/.chrome-profile"
+ensure_dir  "${ROOT_DIR}/apps/web-worker/lanes"
 ensure_dir  "${ROOT_DIR}/apps/web-worker/outputs"
 ensure_dir  "${ROOT_DIR}/apps/scrapers/worker-image/image_chrome_profile"
 ensure_dir  "${ROOT_DIR}/apps/internal-ai/internal-ai-profile"
