@@ -291,6 +291,26 @@ require_wireguard_conf() {
   fi
 }
 
+# Wait until the WireGuard sidecar reports a completed handshake with its peer.
+# Args: container name, timeout seconds (default 60). Returns non-zero on timeout.
+wait_for_wireguard_peer() {
+  local container="$1"
+  local timeout="${2:-60}"
+  local elapsed=0 hs
+  log "Waiting for WireGuard handshake in ${container} (timeout ${timeout}s)..."
+  while (( elapsed < timeout )); do
+    # `latest-handshakes` prints "<pubkey>\t<unix-ts>"; ts>0 means a handshake occurred.
+    hs="$(docker exec "${container}" wg show wg0 latest-handshakes 2>/dev/null | awk '{print $2}' | sort -nr | head -1)"
+    if [[ "${hs}" =~ ^[0-9]+$ && "${hs}" -gt 0 ]]; then
+      ok "WireGuard handshake established (${container})"
+      return 0
+    fi
+    sleep 3
+    elapsed=$((elapsed + 3))
+  done
+  return 1
+}
+
 resolve_app_host() {
   if [[ -z "${APP_HOST:-}" && -n "${STORAGE_SERVER_IP:-}" ]]; then
     export APP_HOST="${STORAGE_SERVER_IP}"

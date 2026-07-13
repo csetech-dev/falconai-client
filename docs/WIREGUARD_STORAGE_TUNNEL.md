@@ -134,6 +134,58 @@ docker stop falcon-wg-app && make deploy-app     # dies at wait_for_tcp (expecte
 docker start falcon-wg-app                        # recover
 ```
 
+## Verify traffic is encrypted
+
+Confirm with packet captures that cross-host traffic is ciphertext on the wire.
+Find the LAN interface facing the peer first:
+
+```bash
+# on the storage host, <app-host-ip> = the app host's LAN IP
+ip -o route get <app-host-ip>        # note "dev <iface>" (e.g. eth0)
+```
+
+**A. On the wire = WireGuard ciphertext** (storage host):
+
+```bash
+sudo tcpdump -ni <iface> host <app-host-ip> and udp port 51820 -X -c 5
+```
+
+Every packet is UDP/51820; the payload starts with `0x04` (WireGuard transport)
+followed by opaque ciphertext — no SQL text, HTTP headers, or bucket names.
+
+**B. No plaintext leaks across the LAN** (storage host, while the app is running):
+
+```bash
+sudo tcpdump -ni <iface> host <app-host-ip> and \( port 5432 or port 9000 or port 12002 or port 12004 \)
+```
+
+Expected: **0 packets**. Postgres/MinIO traffic never crosses the LAN in cleartext —
+it exists only inside the UDP/51820 flow from (A).
+
+**C. Contrast — same traffic is readable inside the tunnel** (storage host):
+
+`wg0` lives in the sidecar's network namespace, so sniff it via `nsenter`
+(no tooling to install in the container):
+
+```bash
+PID=$(docker inspect -f '{{.State.Pid}}' falcon-wg-storage)
+sudo nsenter -t "$PID" -n tcpdump -ni wg0 -X -c 20
+```
+
+Post-decryption you'll see the readable Postgres wire protocol / MinIO HTTP —
+the same bytes that were ciphertext in (A). That's the proof: plaintext inside
+the tunnel, ciphertext on the wire.
+
+Generate traffic from the **app host** so the captures aren't empty:
+
+```bash
+make db-psql                                                  # Postgres query over the tunnel
+curl -fsS "http://$STORAGE_SERVER_IP:12004/minio/health/live" # MinIO over the tunnel
+```
+
+tcpdump flags: `-n` no DNS · `-i` interface · `-X` hex+ASCII payload ·
+`-c N` stop after N packets · `-w cap.pcap` save for Wireshark.
+
 ## Operations
 
 - **Restart tunnel:** `docker restart falcon-wg-app` / `falcon-wg-storage`.
