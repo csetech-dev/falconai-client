@@ -1,0 +1,161 @@
+name: falcon-storage
+x-logging:
+  driver: json-file
+  options:
+    max-size: 10m
+    max-file: '3'
+services:
+  minio:
+    image: minio/minio:latest
+    container_name: falcon-minio
+    restart: unless-stopped
+    # STORAGE_BIND_IP is set by the deploy script from WIREGUARD_ENABLED:
+    #   tunnel ON  -> 127.0.0.1 (not public; app reaches MinIO via the tunnel /
+    #                 falcon-wg-storage DNAT to the static IP below)
+    #   tunnel OFF -> 0.0.0.0   (published publicly; app connects directly)
+    ports:
+    - ${STORAGE_BIND_IP:-127.0.0.1}:${MINIO_API_PORT:-12004}:9000
+    - ${STORAGE_BIND_IP:-127.0.0.1}:${MINIO_CONSOLE_PORT:-12015}:9001
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      MINIO_BROWSER_REDIRECT_URL: ${MINIO_BROWSER_REDIRECT_URL:-}
+    volumes:
+    - minio_data:/data
+    command: server /data --console-address ":9001"
+    healthcheck:
+      test:
+      - CMD
+      - curl
+      - -f
+      - http://localhost:9000/minio/health/live
+      interval: 30s
+      timeout: 20s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '1'
+        reservations:
+          memory: 256M
+          cpus: '0.25'
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '3'
+    networks:
+      falcon-net:
+        ipv4_address: 172.29.0.11
+  postgres:
+    image: pgvector/pgvector:0.8.1-pg18
+    container_name: falcon-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-falcon_ai}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_INITDB_ARGS: --data-checksums
+    # STORAGE_BIND_IP: 127.0.0.1 when the tunnel is ON (not public), 0.0.0.0 when OFF.
+    ports:
+    - ${STORAGE_BIND_IP:-127.0.0.1}:${POSTGRES_PORT:-12002}:5432
+    volumes:
+    - postgres_data:/var/lib/postgresql
+    healthcheck:
+      test:
+      - CMD-SHELL
+      - pg_isready -U postgres
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '2'
+        reservations:
+          memory: 512M
+          cpus: '0.5'
+    command: 'postgres -c max_connections=200 -c shared_buffers=512MB -c effective_cache_size=1536MB
+      -c work_mem=16MB -c maintenance_work_mem=128MB -c random_page_cost=1.1 -c effective_io_concurrency=200
+      -c wal_buffers=16MB -c max_wal_size=2GB -c checkpoint_completion_target=0.9
+
+      '
+    networks:
+      falcon-net:
+        ipv4_address: 172.29.0.10
+        aliases:
+        - postgres
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '3'
+  minio-init:
+    image: minio/mc:latest
+    container_name: falcon-minio-init
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+    entrypoint: '/bin/sh -c " mc alias set local http://falcon-minio:9000 \"$$MINIO_ROOT_USER\"
+      \"$$MINIO_ROOT_PASSWORD\"; mc mb --ignore-existing local/imas; mc anonymous set download
+      local/imas; echo ''Bucket imas ready.''; "
+
+      '
+    restart: on-failure
+    networks:
+    - falcon-net
+  # WireGuard tunnel endpoint for encrypted app<->storage traffic.
+  # Terminates the tunnel at 10.9.0.1 and DNATs the storage ports arriving on
+  # wg0 to the Postgres/MinIO containers (static IPs above). See
+  # docs/WIREGUARD_STORAGE_TUNNEL.md. Config: ./infra/wireguard/storage/wg0.conf
+  wireguard:
+    image: linuxserver/wireguard:latest
+    container_name: falcon-wg-storage
+    restart: unless-stopped
+    # Only started when the deploy script activates the "wireguard" profile
+    # (WIREGUARD_ENABLED=true, the default).
+    profiles:
+    - wireguard
+    cap_add:
+    - NET_ADMIN
+    - SYS_MODULE
+    sysctls:
+    - net.ipv4.ip_forward=1
+    - net.ipv4.conf.all.src_valid_mark=1
+    environment:
+      PUID: '1000'
+      PGID: '1000'
+      TZ: ${TZ:-UTC}
+    volumes:
+    - ./infra/wireguard/storage:/config/wg_confs
+    - /lib/modules:/lib/modules:ro
+    ports:
+    - ${WG_LISTEN_PORT:-51820}:51820/udp
+    healthcheck:
+      test:
+      - CMD-SHELL
+      - wg show wg0 >/dev/null 2>&1 || exit 1
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '3'
+    networks:
+    - falcon-net
+volumes:
+  postgres_data: null
+  minio_data: null
+networks:
+  falcon-net:
+    driver: bridge
+    ipam:
+      config:
+      - subnet: 172.29.0.0/16

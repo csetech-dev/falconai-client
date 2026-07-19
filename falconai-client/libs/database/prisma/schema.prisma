@@ -1,0 +1,3229 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
+  binaryTargets   = ["native", "linux-musl-openssl-3.0.x"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  extensions = [vector, pg_trgm, unaccent]
+}
+
+// ============================================
+// ENUMS
+// ============================================
+
+enum UserRole {
+  ADMIN
+  USER
+  MODERATOR
+  TECHNICAL
+  AI_SERVICE
+  API_CLIENT
+}
+
+enum AuthProvider {
+  LOCAL
+  OIDC
+  SAML
+}
+
+enum PermissionAction {
+  READ
+  CREATE
+  EDIT
+  DELETE
+}
+
+enum CampaignStatus {
+  DRAFT
+  ACTIVE
+  PAUSED
+  COMPLETED
+  ARCHIVED
+}
+
+enum ScrapeJobStatus {
+  PENDING
+  RUNNING
+  COMPLETED
+  FAILED
+  TERMINATED
+}
+
+enum SocialAccountStatus {
+  ACTIVE
+  NEEDS_LOGIN
+  COOLDOWN
+  DISABLED
+  ERROR
+}
+
+enum ScrapePlatform {
+  TWITTER
+  FACEBOOK
+  LINKEDIN
+  WEB_WORKER
+  NEWS
+  TELEGRAM
+  VIDEO
+  YOUTUBE
+}
+
+enum EntityType {
+  PERSON
+  ORGANIZATION
+  LOCATION
+  DATE
+  MONEY
+  PRODUCT
+  EVENT
+  OTHER
+}
+
+enum TrendPeriod {
+  HOURLY
+  DAILY
+  WEEKLY
+}
+
+enum ProfileType {
+  PERSONAL
+  INFLUENCER
+  BRAND
+  MEDIA
+  GOVERNMENT
+  OTHER
+}
+
+enum ActionType {
+  MONITOR
+  TRACK
+  ANALYZE
+  ENGAGE
+  REPORT
+  NON_MONITOR
+}
+
+enum ProfileStatus {
+  ACTIVE
+  INACTIVE
+  PAUSED
+  ARCHIVED
+}
+
+enum ProfilePriority {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum SuspicionStatus {
+  CLEAN
+  SUSPECTED
+  FLAGGED
+  CONFIRMED_BOT
+  IGNORED
+}
+
+enum CommentCategory {
+  PRAISE
+  QUESTION
+  COMPLAINT
+  NEUTRAL
+  SPAM
+  OTHER
+}
+
+enum AnalyticsPeriod {
+  HOURLY
+  DAILY
+  WEEKLY
+  MONTHLY
+  QUARTERLY
+  YEARLY
+}
+
+enum ReactionType {
+  LIKE
+  LOVE
+  HAHA
+  WOW
+  SAD
+  ANGRY
+  CARE
+  OTHER
+}
+
+enum JobPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+enum WorkerStatus {
+  ONLINE
+  OFFLINE
+  BUSY
+  IDLE
+  MAINTENANCE
+}
+
+enum KeywordStatus {
+  ACTIVE
+  INACTIVE
+  ARCHIVED
+}
+
+enum KeywordCategoryType {
+  MANUAL
+  AI_GENERATED
+  TODAYS
+  TRENDING
+  TOP_NEWS
+}
+
+enum KeywordCategoryReference {
+  no_assigned
+  is_politics
+  is_international_trade
+  is_economics
+}
+
+enum GroupTargetType {
+  PROFILE
+  POST
+  SESSION
+  ARTICLE
+}
+
+enum FeedbackTargetType {
+  PROFILE
+  COMMENTER
+  SHARER
+}
+
+enum PostRankType {
+  LATEST
+  TRENDING
+  VIRAL
+}
+
+enum PostStatus {
+  NOT_ANALYZED
+  GOOD
+  BAD
+}
+
+enum NewsStatus {
+  NOT_ANALYZED
+  GOOD
+  BAD
+}
+
+enum NotificationStatus {
+  UNREAD
+  SEEN
+  READ
+  DISMISSED
+  ARCHIVED
+}
+
+enum NotificationPriority {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum NewsTickerType {
+  TOP_BREAKING
+  BOTTOM_INTERNATIONAL
+  BOTTOM_NATIONAL
+}
+
+
+// ============================================
+// MODELS
+// ============================================
+
+model User {
+  id              String     @id @default(cuid())
+  email           String     @unique
+  username        String?
+  password        String?
+  firstName       String?
+  lastName        String?
+  roles           UserRole[] @default([USER])
+  isActive        Boolean    @default(true)
+  authProvider    AuthProvider @default(LOCAL)
+  externalSubjectId String?
+  refreshToken    String?
+  lastLogin       DateTime?
+  apiKey          String?
+  apiRequestCount Int        @default(0)
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+  
+  campaigns       Campaign[]
+  keywords  Keyword[]
+  keywordCategories KeywordCategory[]
+  newsMedia       NewsMedia[]
+  groups          Group[]
+
+  reports             Report[]
+  reportTemplates     ReportTemplate[]
+  reportVersions      ReportVersion[]      @relation("ReportVersionAuthor")
+  reportCollaborations ReportCollaborator[]
+  notifications       UserNotification[]
+  permissions         UserPermission[]
+
+  reportBookmarks      ReportBookmark[]
+
+  @@map("users")
+}
+
+model UserPermission {
+  id         String           @id @default(cuid())
+  userId     String
+  resource   String
+  action     PermissionAction
+  resourceId String           @default("*")
+  grantedBy  String
+  createdAt  DateTime         @default(now())
+
+  user       User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, resource, action, resourceId])
+  @@map("user_permissions")
+}
+
+model NotificationTypeConfig {
+  id                String             @id @default(cuid())
+  code              String             @unique
+  label             String
+  description       String?            @db.Text
+  source            String?
+  category          String?
+  enabled           Boolean            @default(true)
+  defaultTitle      String?
+  defaultActionLabel String?
+  defaultActionUrl  String?
+  deliveryConfig    Json?
+  metadata          Json?
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+
+  notifications     UserNotification[]
+
+  @@index([enabled, source])
+  @@index([category])
+  @@map("notification_type_configs")
+}
+
+model UserNotification {
+  id                 String                 @id @default(cuid())
+  userId             String
+  user               User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  notificationTypeId String
+  notificationType   NotificationTypeConfig @relation(fields: [notificationTypeId], references: [id], onDelete: Cascade)
+  status             NotificationStatus     @default(UNREAD)
+  priority           NotificationPriority   @default(MEDIUM)
+  title              String
+  message            String?                @db.Text
+  shortMessage       String?                @db.Text
+  source             String?
+  eventKey           String?
+  dedupeKey          String?
+  actionLabel        String?
+  actionUrl          String?
+  entityType         String?
+  entityId           String?
+  metadata           Json?
+  seenAt             DateTime?
+  readAt             DateTime?
+  dismissedAt        DateTime?
+  archivedAt         DateTime?
+  expiresAt          DateTime?
+  createdAt          DateTime               @default(now())
+  updatedAt          DateTime               @updatedAt
+
+  topicCategoryKey   String?
+  topicCategoryLabel String?
+
+  @@index([userId, status, createdAt])
+  @@index([userId, createdAt])
+  @@index([notificationTypeId, status])
+  @@index([priority, createdAt])
+  @@index([eventKey])
+  @@index([dedupeKey])
+  @@index([entityType, entityId])
+  @@index([userId, topicCategoryKey, createdAt])
+  @@unique([userId, dedupeKey])
+  @@map("user_notifications")
+}
+
+model Group {
+  id          String          @id @default(cuid())
+  userId      String?
+  user        User?           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name        String
+  type        GroupTargetType
+  color       String          @default("#6b7280")
+  icon        String          @default("Layers")
+  description String?         @db.Text
+  isDefault   Boolean         @default(false)
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  items       GroupItem[]
+  postCache   GroupPostCache[]
+
+  @@index([userId])
+  @@index([type])
+  @@unique([userId, type, name])
+  @@map("groups")
+}
+
+model GroupItem {
+  id          String          @id @default(cuid())
+  groupId     String
+  group       Group           @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  targetId    String
+  targetType  GroupTargetType
+  createdAt   DateTime        @default(now())
+
+  @@unique([groupId, targetId, targetType])
+  @@index([groupId])
+  @@index([targetId, targetType])
+  @@map("group_items")
+}
+
+model ProfileGroup {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  type        String   @default("general")
+  color       String   @default("#6b7280")
+  icon        String   @default("Layers")
+  description String?  @db.Text
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  items       ProfileGroupItem[]
+
+  @@map("profile_groups")
+}
+
+model ProfileGroupItem {
+  id             String       @id @default(cuid())
+  profileGroupId String
+  profileGroup   ProfileGroup @relation(fields: [profileGroupId], references: [id], onDelete: Cascade)
+  campaignId     String
+  campaign       Campaign     @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  createdAt      DateTime     @default(now())
+
+  @@unique([profileGroupId, campaignId])
+  @@index([profileGroupId])
+  @@index([campaignId])
+  @@map("profile_group_items")
+}
+
+model ProfileIdentityMember {
+  id         String   @id @default(cuid())
+  clusterId  String
+  campaignId String   @unique
+  campaign   Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  createdAt  DateTime @default(now())
+
+  @@index([clusterId])
+  @@map("profile_identity_members")
+}
+
+model Campaign {
+  id              String          @id @default(cuid())
+  name            String
+  keywords        String[]        // Array of keywords for the campaign
+  status          CampaignStatus  @default(DRAFT)
+  platform        ScrapePlatform  @default(NEWS)
+
+  // News scraping parameters (optional)
+  sources         String[]        @default([])
+  timeRange       String?
+  maxArticles     Int?
+
+  // === MERGED FROM SocialProfile ===
+  // Profile identification (for social campaigns)
+  username        String?
+  displayName     String?
+  profileType     ProfileType     @default(PERSONAL)
+  actionType      ActionType      @default(MONITOR)
+  priority        ProfilePriority @default(MEDIUM)
+  verified        Boolean         @default(false)
+  autoScrape      Boolean         @default(false)
+  bio             String?         @db.Text
+  avatarUrl       String?
+  profileUrl      String?
+  
+  // Contact Info
+  email           String?
+  phone           String?
+  designation     String?
+  address         String?
+  city            String?
+  country         String?
+  hometown        String?
+
+  // Social Links
+  website         String?
+  twitterUrl      String?
+  instagramUrl    String?
+  facebookUrl     String?
+  linkedinUrl     String?
+  tiktokUrl       String?
+  youtubeUrl      String?
+  
+  // Metrics (current)
+  followers       Int             @default(0)
+  following       Int             @default(0)
+  postsCount      Int             @default(0)
+  engagementRate  Float           @default(0)
+  
+  // Additional
+  tags            String[]        @default([])
+  work            Json?
+  education       Json?
+  notes           String?         @db.Text
+  lastScrapedAt   DateTime?
+  aiAnalysisStatus String?      @default("PENDING")
+  // === END MERGED FIELDS ===
+
+  // === BOT DETECTION (commenter suspicion) ===
+  // Populated only for NON_MONITOR campaigns (commenters); MONITOR profiles always remain CLEAN.
+  suspicionStatus     SuspicionStatus @default(CLEAN)
+  suspicionScore      Float?
+  suspicionFlags      Json?
+  suspiciousAt        DateTime?
+  suspicionReviewedBy String?
+  suspicionReviewedAt DateTime?
+  suspicionLastScanAt DateTime?
+  // === END BOT DETECTION ===
+
+  // AI Hybrid Search (added by migration 002_ai_search)
+  searchTsv        Unsupported("tsvector")?      @map("search_tsv")       // Full-text search vector
+  profileEmbedding Unsupported("vector(1024)")?  @map("profile_embedding") // BGE-M3 semantic embedding
+
+  userId    String?
+  user      User?          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  newsMediaId String?
+  newsMedia   NewsMedia?   @relation(fields: [newsMediaId], references: [id], onDelete: SetNull)
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+  
+  // Relations
+  jobs             ScrapeJob[]
+  trends           TrendSnapshot[]
+  campaignKeywords CampaignKeyword[]
+  posts            SocialPost[]
+  snapshots        ProfileSnapshot[]
+  followerAnalytics FollowerAnalytics[]
+  checkins         SocialCheckin[]
+  aiAnalytics      ProfileAIAnalytics[]
+  aiAnalysisRequests AIAnalysisRequest[]
+  sharedPosts      PostShare[]     @relation("SharerProfile")
+  reactions        PostReaction[]  @relation("ReactorProfile")
+  newsHeadlines    NewsHeadline[]
+  newsArticles     NewsArticle[]
+  feedbacks        ProfileFeedback[]
+  postComments     PostComment[]
+  wildSearchBookmarks WildSearchBookmark[]
+  videos              Video[]
+  videoSnapshots      VideoSnapshot[]
+  profileGroupItems   ProfileGroupItem[]
+  identityMember      ProfileIdentityMember?
+  
+  @@unique([platform, username])
+  @@index([userId])
+  @@index([platform])
+  @@index([status])
+  @@index([autoScrape])
+  @@index([newsMediaId])
+  @@index([actionType, suspicionStatus])
+  @@index([suspicionStatus])
+  @@map("campaigns")
+}
+
+model SocialCheckin {
+  id         String   @id @default(cuid())
+  campaignId String
+  campaign   Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  title      String
+  location   String
+  visitedOn  String
+  placeUrl   String?
+  pageId     String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([campaignId])
+  @@index([pageId])
+  @@map("social_checkins")
+}
+
+model ScrapeJob {
+  id         String          @id @default(cuid())
+  
+  // Campaign scrapes (for both campaign-based and profile-based scraping)
+  campaignId String?
+  campaign   Campaign?       @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  
+  // Post-level scrapes: comments, shares (optional)
+  postId     String?
+  post       SocialPost?     @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  // Video-level scrapes (video snapshot pipeline). A YouTube video has no
+  // social_post, so its snapshot follow-up / recurring jobs reference the
+  // videos row directly. Nullable + independent of postId: a FB video snapshot
+  // job still uses postId (it lives in social_post), a YouTube one uses videoId.
+  videoId    String?         @map("video_id")
+  video      Video?          @relation(fields: [videoId], references: [id], onDelete: Cascade)
+
+  status     ScrapeJobStatus @default(PENDING)
+  platform   ScrapePlatform
+  priority   JobPriority     @default(MEDIUM)
+  
+  // Error handling
+  errorMessage String?       @db.Text
+  errorCode    String?
+  retryCount   Int           @default(0)
+  
+  // Interval
+  interval     Int?          // Duration in seconds
+  startedAt    DateTime?
+  completedAt  DateTime?
+  
+  // Progress tracking
+  itemsProcessed Int         @default(0)
+  itemsTotal     Int?
+  progress       Float?      // 0-100 percentage
+  
+  // Rate limiting / Scheduling
+  lastRunAt    DateTime?
+  nextRunAt    DateTime?
+  
+  // Worker assignment
+  workerId     String?
+  
+  // Job metadata (platform-specific config: hours, days, maxComments, etc.)
+  config       Json?
+
+  // Coarse job classification / lifecycle tag (e.g. PROFILE_INFO, SNAPSHOT_FOLLOWUP, SNAPSHOT_MONITOR_RECURRING)
+  notes        String?         @db.Text
+
+  // Social account routing — which lane/account handled this job.
+  // Kept on history when an account is removed (SetNull).
+  socialAccountId String?
+  socialAccount   SocialAccount? @relation(fields: [socialAccountId], references: [id], onDelete: SetNull)
+
+  createdAt  DateTime        @default(now())
+  updatedAt  DateTime        @updatedAt
+  results    ScrapeResult[]
+
+  @@index([campaignId])
+  @@index([postId])
+  @@index([videoId])
+  @@index([status])
+  @@index([priority])
+  @@index([nextRunAt])
+  @@index([workerId])
+  @@index([socialAccountId])
+  @@map("scrape_jobs")
+}
+
+model SystemConf {
+  key   String @id
+  value String @db.Text
+
+  @@map("system_conf")
+}
+
+// ============================================
+// SOCIAL ACCOUNT ROUTING
+// Multi-account scraping (starting with worker-fb). Each SocialAccount is a
+// "lane": an isolated Chrome profile + a pinned proxy IP + its own VNC display.
+// The worker's LaneManager load-balances scrape jobs across enabled, healthy
+// lanes. This table is the management/source-of-truth plane (CRUD from the
+// Technical Panel); the worker pulls the registry and pushes health back.
+// ============================================
+
+model SocialAccount {
+  id         String              @id @default(cuid())
+
+  platform   ScrapePlatform      @default(FACEBOOK)
+  label      String                                  // admin-friendly display name
+  username   String?                                 // optional, for display only
+
+  // Lane identity — deterministically derives the worker's per-lane resources
+  // (Chrome profile dir, Xvfb display :100+i, x11vnc 5900+i, noVNC 7900+i).
+  // Unique per platform so future platforms can reuse lane numbers.
+  laneIndex  Int
+
+  status     SocialAccountStatus @default(NEEDS_LOGIN)
+  enabled    Boolean             @default(true)
+  priority   Int                 @default(100)       // load-balancer weight (higher = preferred)
+  maxConcurrent Int              @default(1)         // jobs at once on this lane (lane stays serialized)
+
+  // Proxy binding — ONE pinned IP per lane (picked from system_conf proxy.list).
+  proxyUrl   String?             @db.Text
+
+  // Platform auth metadata. Used by the Telegram technical-panel auth flow to
+  // persist official API credentials and session state in the DB instead of
+  // worker-local environment variables.
+  authPhone            String?
+  authApiId            String?
+  authApiHash          String?             @db.Text
+  authPhoneCodeHash    String?             @db.Text
+  authSessionPath      String?             @db.Text
+  authSessionExists    Boolean             @default(false)
+  authLastAuthorizedAt DateTime?
+
+  // Health / telemetry — written back by the worker.
+  cookieValid         Boolean    @default(false)
+  cookieExpiresAt     DateTime?
+  lastUsedAt          DateTime?
+  lastSuccessAt       DateTime?
+  lastErrorAt         DateTime?
+  lastError           String?    @db.Text
+  consecutiveFailures Int        @default(0)
+  rateLimitedUntil    DateTime?
+  jobsToday           Int        @default(0)
+  totalJobs           Int        @default(0)
+  dailyJobLimit       Int?       @default(200)        // max jobs/day for this lane; null = unlimited (default 200)
+  // Daily TIME budget — a second, parallel throttle to dailyJobLimit. A lane
+  // stops accepting NEW jobs when EITHER the job cap OR the time cap is hit.
+  // Enforced in worker-fb lane_manager.try_acquire; null/0 = unlimited.
+  dailyTimeLimitSeconds Int?     @default(0)          // max active seconds/day; null/0 = unlimited
+  timeUsedTodaySeconds  Int      @default(0)          // accumulated active seconds today (telemetry mirror)
+  // The calendar day (YYYY-MM-DD, worker TZ) jobsToday/timeUsedTodaySeconds
+  // belong to — lets the worker re-hydrate counters on restart only if still today.
+  countersDate          String?
+
+  createdBy  String?                                 // super admin user id
+  createdAt  DateTime            @default(now())
+  updatedAt  DateTime            @updatedAt
+
+  events     SocialAccountEvent[]
+  jobs       ScrapeJob[]
+  proxy      SocialProxy?         @relation("AccountProxy")
+
+  @@unique([platform, laneIndex])
+  @@index([platform])
+  @@index([status])
+  @@index([enabled])
+  @@map("social_accounts")
+}
+
+// Dedicated, platform-scoped proxy inventory for social-media scraping.
+// Completely separate from the shared proxy-rotator. One proxy is assigned to at
+// most one account (1:1), so every account/lane gets its own dedicated IP.
+model SocialProxy {
+  id            String         @id @default(cuid())
+  platform      ScrapePlatform @default(FACEBOOK)
+  host          String
+  port          Int
+  username      String?
+  password      String?        @db.Text
+  label         String?
+  enabled       Boolean        @default(true)
+  status        String         @default("UNKNOWN") // UNKNOWN | HEALTHY | DEAD
+  lastCheckedAt DateTime?
+
+  // 1:1 assignment to a social account.
+  assignedAccountId String?        @unique
+  assignedAccount   SocialAccount? @relation("AccountProxy", fields: [assignedAccountId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([platform, host, port])
+  @@index([platform])
+  @@index([enabled])
+  @@map("social_proxies")
+}
+
+model SocialAccountEvent {
+  id        String        @id @default(cuid())
+  accountId String
+  account   SocialAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  type      String        // LOGIN | COOKIE_INVALID | COOLDOWN | ERROR | ENABLED | DISABLED | JOB | PROXY_CHANGED
+  message   String?       @db.Text
+  createdAt DateTime      @default(now())
+
+  @@index([accountId, createdAt])
+  @@map("social_account_events")
+}
+
+model TechnicalPanelAiAutomationSetting {
+  id            String   @id @default(cuid())
+  automationKey String   @unique
+  enabled       Boolean  @default(false)
+  running       Boolean  @default(false)
+  aiProvider    String   @default("falcon")
+  aiModel       String   @default("web-grok/grok-expert")
+  message       String?  @db.Text
+  startedAt     DateTime?
+  stoppedAt     DateTime?
+  lastItemId    String?
+  processed     Int      @default(0)
+  completed     Int      @default(0)
+  failed        Int      @default(0)
+  lastError     String?  @db.Text
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([automationKey])
+  @@map("technical_panel_ai_automation_settings")
+}
+
+model TechnicalPanelAiProviderSetting {
+  id                String   @id @default(cuid())
+  settingsKey       String   @unique
+  provider          String   @default("cortex")
+  providerConfigs   Json
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([settingsKey])
+  @@map("technical_panel_ai_provider_settings")
+}
+
+model BotDetectionSettings {
+  id                              String   @id @default(cuid())
+  settingsKey                     String   @unique @default("default")
+  enabled                         Boolean  @default(true)
+  scanIntervalSeconds             Int      @default(300)
+
+  // Lookback window — how far back to consider posted-time-populated comments.
+  // Null = no time bound (all-time, current default). When set, applies ONLY to
+  // postedAt-populated rows; null-postedAt rows are always included regardless
+  // (Option A rule — never substitute scrapedAt as a posting-time proxy).
+  lookbackWindowHours             Int?
+
+  rateBurstWindowSeconds          Int      @default(60)
+  rateBurstThreshold              Int      @default(5)
+  rateSustainedWindowMinutes      Int      @default(10)
+  rateSustainedThreshold          Int      @default(20)
+  samePostWindowMinutes           Int      @default(60)
+  samePostMaxComments             Int      @default(5)
+  duplicateSimilarity             Float    @default(0.85)
+  duplicateMinOccurrences         Int      @default(3)
+  crossCampaignMinPerDay          Int      @default(10)
+
+  // Signal weights — tunable from UI, were hardcoded before
+  weightBurst                     Float    @default(0.30)
+  weightSustained                 Float    @default(0.20)
+  weightSamePost                  Float    @default(0.20)
+  weightDuplicate                 Float    @default(0.20)
+  weightCrossCampaign             Float    @default(0.10)
+
+  // Score thresholds — the 3 cutoffs that define CLEAN/SUSPECTED/FLAGGED/CONFIRMED_BOT ranges
+  scoreThresholdSuspected         Float    @default(0.3)
+  scoreThresholdFlagged           Float    @default(0.6)
+  scoreThresholdAutoConfirm       Float    @default(0.85)
+
+  // Auto-confirm policy — score >= autoConfirm AND triggered >= minSignals
+  autoConfirmEnabled              Boolean  @default(true)
+  autoConfirmMinTriggeredSignals  Int      @default(3)
+
+  // Performance tuning — were hardcoded constants before
+  scanCandidateBatchSize          Int      @default(200)
+  scanAnalysisConcurrency         Int      @default(20)
+  recentCommentFetchCap           Int      @default(1000)
+
+  createdAt                       DateTime @default(now())
+  updatedAt                       DateTime @updatedAt
+
+  @@map("bot_detection_settings")
+}
+
+model Worker {
+  id              String         @id @default(cuid())
+  name            String         @unique
+  
+  // Capabilities
+  platforms       ScrapePlatform[] // Which platforms this worker can handle
+  
+  // Status & Health
+  status          WorkerStatus   @default(OFFLINE)
+  lastHeartbeat   DateTime?
+  lastJobAt       DateTime?      // Last time it processed a job
+  
+  // Performance metrics
+  jobsCompleted   Int            @default(0)
+  jobsFailed      Int            @default(0)
+  avgJobDuration  Float?         // Average job duration in seconds
+  
+  // Configuration
+  maxConcurrent   Int            @default(1)  // Max concurrent jobs
+  currentLoad     Int            @default(0)  // Current active jobs
+  version         String?        // Worker version for compatibility
+  
+  // Connection info
+  ipAddress       String?
+  hostname        String?
+  metadata        Json?          // Additional worker metadata
+  
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+  
+  @@index([status])
+  @@index([lastHeartbeat])
+  @@map("workers")
+}
+
+model ScrapeResult {
+  id           String       @id @default(cuid())
+  jobId        String
+  job          ScrapeJob    @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  
+  // Content
+  rawContent   String       @db.Text
+  url          String?
+  title        String?
+  author       String?
+  summary      String?      @db.Text
+  tags         String[]     @default([])
+  contentLength Int?        @map("content_length")
+  matchedKeywords String[]  @default([]) @map("matched_keywords")
+  
+  // Metadata - DO NOT USE THESE FIELDS, USE rawPublishedAt and rawScrapedAt INSTEAD
+  publishedAt  DateTime?    // UNUSED - Use rawPublishedAt instead
+  scrapedAt    DateTime?    // UNUSED - Use rawScrapedAt instead
+  rawPublishedAt String?    // Raw date string from news worker
+  rawScrapedAt   String?    // Raw scraped date string from news worker
+  
+  // AI Analysis Results
+  sentiment    Float?       // -1 to 1
+  embedding    Unsupported("vector(1536)")?  // pgvector
+  
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+  
+  // Relations
+  newsArticle  NewsArticle?
+  newsHeadline NewsHeadline?
+  entities     Entity[]
+  topics       Topic[]
+  toxicity     Toxicity?
+  // legacy FactCheck relation removed; SocialPostFactCheck is the live fact-check store
+  keywordMatches ScrapeResultKeyword[]
+  
+  @@index([jobId])
+  @@index([publishedAt])
+  @@index([scrapedAt])
+  @@index([tags], type: Gin)
+  @@map("scrape_results")
+}
+
+// ============================================
+// KEYWORD MANAGEMENT MODELS
+// ============================================
+
+model KeywordCategory {
+  id          String    @id @default(cuid())
+  name        String
+  description String?   @db.Text
+  color       String    @default("#06b6d4") // Default cyan color
+  type        KeywordCategoryType @default(MANUAL)
+  reference   KeywordCategoryReference @default(no_assigned)
+  isVisible   Boolean   @default(true)
+  
+  // User relationship
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  // Ordering
+  sortOrder   Int       @default(0)
+  
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  
+  // Relations
+  keywords    Keyword[]
+  newsArticles NewsArticle[]
+  trendingIntelligenceSnapshots TrendingCategoryIntelligence[]
+  
+  @@unique([userId, name])
+  @@index([userId])
+  @@index([sortOrder])
+  @@index([type])
+  @@index([reference])
+  @@index([isVisible])
+  @@map("keyword_categories")
+}
+
+// ============================================
+// TRENDING CATEGORY INTELLIGENCE (AGGREGATE)
+// ============================================
+// NOTE: This table is intended for KeywordCategory.type = TRENDING only.
+// Prisma cannot enforce cross-table enum checks, so enforce this in service layer.
+model TrendingCategoryIntelligence {
+  id               String          @id @default(cuid())
+
+  // Category scope (must point to a TRENDING keyword category by application rule)
+  keywordCategoryId String?
+  keywordCategory   KeywordCategory? @relation(fields: [keywordCategoryId], references: [id], onDelete: Cascade)
+  aiKeyword         String?
+
+  // Time window metadata
+  windowType       String          // e.g. "1h", "6h", "24h", "7d", "custom"
+  windowStart      DateTime
+  windowEnd        DateTime
+  generatedAt      DateTime        @default(now())
+
+  // Coverage and reliability
+  articleCount     Int             @default(0)
+  sampledCount     Int             @default(0)
+  sourceCount      Int             @default(0)
+  confidenceScore  Float?          // 0-1 confidence for this snapshot
+
+  // At-a-glance intelligence payload
+  whatHappened     String?         @db.Text // short narrative summary
+  whyTrending      String?         @db.Text // why this topic is currently trending
+  keyDevelopments  String[]        @default([]) // timeline-like bullets
+  potentialImpact  String?         @db.Text
+
+  // Structured evidence/analytics
+  topEntities      Json?           // [{name,type,count}, ...]
+  topSources       Json?           // [{source,count}, ...]
+  topKeywords      Json?           // [{keyword,count}, ...]
+  trendSignals     Json?           // {volumeSpike, velocity, breakout, ...}
+  evidenceArticleIds String[]      @default([]) // representative supporting article IDs
+
+  // Raw model artifacts and diagnostics
+  modelProvider    String?         // falcon / cortex / etc.
+  modelName        String?
+  promptVersion    String?
+  generationMeta   Json?           // token stats, latency, retries, etc.
+
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+
+  @@index([keywordCategoryId])
+  @@index([aiKeyword])
+  @@index([windowType])
+  @@index([windowStart])
+  @@index([windowEnd])
+  @@index([generatedAt])
+  @@index([confidenceScore])
+  @@unique([keywordCategoryId, windowType, windowStart, windowEnd], map: "uniq_trending_intel_window")
+  @@map("trending_category_intelligence")
+}
+
+model Keyword {
+  id          String        @id @default(cuid())
+  keyword     String
+  color       String        @default("#06b6d4") // Hex color for visual identification
+  status      KeywordStatus @default(ACTIVE)
+  
+  // Category relationship
+  categoryId  String
+  category    KeywordCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  
+  // User relationship
+  userId      String
+  user        User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  description String?       @db.Text
+  aliases     String[]      // Alternative terms/variations
+  
+  // Tracking metrics
+  matchCount  Int           @default(0) // How many times this keyword was matched
+  lastMatchAt DateTime?     // Last time this keyword was found
+  
+  // Configuration
+  caseSensitive Boolean     @default(false)
+  isRegex       Boolean     @default(false)
+  priority      Int         @default(0) // Higher priority keywords checked first
+  
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+  
+  // Relations
+  campaignKeywords CampaignKeyword[]
+  scrapeMatches    ScrapeResultKeyword[]
+  articleLinks     NewsArticleKeyword[]
+  
+  @@unique([userId, categoryId, keyword])
+  @@index([userId])
+  @@index([categoryId])
+  @@index([status])
+  @@index([keyword])
+  @@map("keywords")
+}
+
+model CampaignKeyword {
+  id          String    @id @default(cuid())
+  campaignId  String
+  campaign    Campaign  @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  
+  keywordId   String
+  keyword     Keyword   @relation(fields: [keywordId], references: [id], onDelete: Cascade)
+  
+  // Campaign-specific settings
+  isEnabled   Boolean   @default(true)
+  
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  
+  @@unique([campaignId, keywordId])
+  @@index([campaignId])
+  @@index([keywordId])
+  @@map("campaign_keywords")
+}
+
+model ScrapeResultKeyword {
+  id              String       @id @default(cuid())
+  scrapeResultId  String
+  scrapeResult    ScrapeResult @relation(fields: [scrapeResultId], references: [id], onDelete: Cascade)
+  
+  keywordId       String
+  keyword         Keyword      @relation(fields: [keywordId], references: [id], onDelete: Cascade)
+  
+  // Match details
+  matchCount      Int          @default(1)  // How many times in this content
+  positions       Json?        // Array of positions where keyword was found
+  context         String[]     // Surrounding text snippets
+  
+  createdAt       DateTime     @default(now())
+  
+  @@unique([scrapeResultId, keywordId])
+  @@index([scrapeResultId])
+  @@index([keywordId])
+  @@map("scrape_result_keywords")
+}
+// =======================
+// END OF KEYWORD 
+// =======================
+
+// =======================
+// NEWS DATATABLES
+// =======================
+
+// All the news papers
+model NewsSource {
+  id               String            @id @default(cuid())
+  name             String
+  normalizedName   String            @unique
+  officialWebsite  String            @unique
+  logoUrl          String?
+  sourceType       NewsSourceType?   @default(main_stream)
+
+  articles         NewsArticle[]
+  mediaLinks       NewsMediaSource[]
+
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+
+  @@index([name])
+  @@index([officialWebsite])
+  @@index([sourceType])
+  @@map("news_sources")
+}
+
+enum NewsSourceType {
+  main_stream
+  local_stream
+  international_stream
+}
+
+// Group of news papers (Print Media)
+model NewsMedia {
+  id          String            @id @default(cuid())
+  name        String
+  description String?           @db.Text
+  color       String            @default("#06b6d4")
+  sortOrder   Int               @default(0)
+  isBottomTicker Boolean        @default(false)
+
+  userId      String
+  user        User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  campaigns   Campaign[]
+  articles    NewsArticle[]
+  sources     NewsMediaSource[] // id
+
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+
+  @@unique([userId, name])
+  @@index([userId])
+  @@index([sortOrder])
+  @@index([isBottomTicker])
+  @@map("news_media")
+}
+
+model NewsArticle {
+  id             String       @id @default(cuid())
+  scrapeResultId String       @unique
+  scrapeResult   ScrapeResult @relation(fields: [scrapeResultId], references: [id], onDelete: Cascade)
+  campaignId     String?
+  campaign       Campaign?    @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  mediaId        String?
+  media          NewsMedia?   @relation(fields: [mediaId], references: [id], onDelete: SetNull)
+  sourceId       String?
+  source         NewsSource?  @relation(fields: [sourceId], references: [id], onDelete: SetNull)
+  keywordCategoryId String?
+  keywordCategory   KeywordCategory? @relation(fields: [keywordCategoryId], references: [id], onDelete: SetNull)
+  divisionId   String?
+  division     Division?   @relation(fields: [divisionId], references: [id], onDelete: SetNull)
+  districtId   String?
+  district     District?   @relation(fields: [districtId], references: [id], onDelete: SetNull)
+  
+  sourceWebsite  String
+  author         String?
+  title          String?
+  url            String?
+  publishedAt    DateTime?    // UNUSED - Use rawPublishedAt instead
+  scrapedAt      DateTime?    // UNUSED - Use rawScrapedAt instead
+  rawPublishedAt String?      // Raw date string from news worker
+  rawScrapedAt   String?      // Raw scraped date string from news worker
+  category       String?
+  imageUrl       String?
+  content        String?      @db.Text // Full article content
+  contentHash     String       @unique // SHA-256 hash for deduplication
+  status          NewsStatus   @default(NOT_ANALYZED)
+  aiAnalysisStatus String?      @default("PENDING")
+  analysisStatus   String?      @default("PENDING")
+
+  isAlarmingIncident Boolean   @default(false)
+  isAcknowledged     Boolean   @default(false)
+  alarmedAt          DateTime?
+  acknowledgedAt     DateTime?
+
+  // AI Hybrid Search (added by migration 002_ai_search)
+  searchTsv        Unsupported("tsvector")?  @map("search_tsv")    // Full-text search vector
+  titleEmbedding   Unsupported("vector(1024)")?  @map("title_embedding") // BGE-M3 semantic embedding
+
+  newsAIAnalyses  NewsAIAnalysis[]
+  keywordLinks    NewsArticleKeyword[]
+
+  createdAt      DateTime     @default(now())
+
+  @@index([category])
+  @@index([sourceWebsite])
+  @@index([contentHash])
+  @@index([campaignId])
+  @@index([campaignId, scrapedAt])
+  @@index([status])
+  @@index([status, scrapedAt])
+  @@index([aiAnalysisStatus])
+  @@index([analysisStatus])
+  @@index([mediaId])
+  @@index([sourceId])
+  @@index([sourceId, scrapedAt])
+  @@index([keywordCategoryId])
+  @@index([keywordCategoryId, scrapedAt])
+  @@index([scrapedAt])
+  @@index([divisionId])
+  @@index([districtId])
+  @@index([divisionId, sourceId, scrapedAt])
+  @@index([districtId, sourceId, scrapedAt])
+  @@index([isAlarmingIncident, isAcknowledged, divisionId])
+  @@map("news_articles")
+}
+
+model NewsArticleKeyword {
+  id            String      @id @default(cuid())
+  newsArticleId String
+  newsArticle   NewsArticle @relation(fields: [newsArticleId], references: [id], onDelete: Cascade)
+  keywordId     String
+  keyword       Keyword     @relation(fields: [keywordId], references: [id], onDelete: Cascade)
+  createdAt     DateTime    @default(now())
+
+  @@unique([newsArticleId, keywordId])
+  @@index([newsArticleId])
+  @@index([keywordId])
+  @@index([keywordId, newsArticleId])
+  @@map("news_article_keywords")
+}
+
+model NewsSearchPanelCache {
+  id                String   @id @default(cuid())
+  cacheKey          String   @unique
+  keywordCategoryId String?
+  campaignId        String?
+  searchQuery       String?
+  sourcesKey        String?
+  startDate         String?
+  endDate           String?
+  articleCount      Int      @default(0)
+  dbKeywordRows     Json?
+  aiKeywordRows     Json?
+  lastBuiltAt       DateTime?
+  expiresAt         DateTime?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([keywordCategoryId])
+  @@index([campaignId])
+  @@index([expiresAt])
+  @@map("news_search_panel_cache")
+}
+
+// Individual group identification
+model NewsMediaSource {
+  id          String      @id @default(cuid())
+  mediaId     String
+  media       NewsMedia   @relation(fields: [mediaId], references: [id], onDelete: Cascade)
+  sourceId    String
+  source      NewsSource  @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+  createdAt   DateTime    @default(now())
+
+  @@unique([mediaId, sourceId])
+  @@index([mediaId])
+  @@index([sourceId])
+  @@map("news_media_sources")
+}
+
+model Division {
+  id        String     @id @default(cuid())
+  name      String
+  nameBn    String?
+  code      String?
+  latitude  Float?
+  longitude Float?
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+
+  districts District[]
+  newsArticles NewsArticle[]
+
+  @@unique([name])
+  @@unique([nameBn])
+  @@index([code])
+  @@map("divisions")
+}
+
+model District {
+  id           String      @id @default(cuid())
+  divisionId   String
+  division     Division    @relation(fields: [divisionId], references: [id], onDelete: Cascade)
+  name         String
+  nameBn       String?
+  code         String?
+  latitude     Float?
+  longitude    Float?
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+
+  newsArticles NewsArticle[]
+
+  @@unique([divisionId, name])
+  @@unique([divisionId, nameBn])
+  @@index([divisionId])
+  @@index([code])
+  @@map("districts")
+}
+// ================================
+// END OF NEWS DATA TABLES
+// ================================
+
+
+model VideoSource {
+  id        String   @id @default(cuid())
+  name      String
+  link      String
+  logoUrl   String?
+  type      String   @default("Other")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  videos        Video[]
+
+  @@unique([link])
+  @@index([name])
+  @@index([type])
+  @@map("video_sources")
+}
+
+
+model Entity {
+  id         String       @id @default(cuid())
+  resultId   String
+  result     ScrapeResult @relation(fields: [resultId], references: [id], onDelete: Cascade)
+  
+  text       String       // "Joe Biden", "Microsoft"
+  type       EntityType
+  confidence Float
+  startPos   Int?
+  endPos     Int?
+  
+  createdAt  DateTime     @default(now())
+  
+  @@index([resultId])
+  @@index([type])
+  @@index([text])
+  @@map("entities")
+}
+
+model Topic {
+  id        String       @id @default(cuid())
+  resultId  String
+  result    ScrapeResult @relation(fields: [resultId], references: [id], onDelete: Cascade)
+  
+  label     String       // "Climate Change", "AI Ethics"
+  score     Float        // 0-1 relevance
+  keywords  String[]     // Associated keywords
+  
+  createdAt DateTime     @default(now())
+  
+  @@index([resultId])
+  @@index([label])
+  @@map("topics")
+}
+
+model Toxicity {
+  id               String       @id @default(cuid())
+  resultId         String       @unique
+  result           ScrapeResult @relation(fields: [resultId], references: [id], onDelete: Cascade)
+  
+  overall          Float        // 0-1
+  hate             Float
+  threat           Float
+  profanity        Float
+  identityAttack   Float
+  sexuallyExplicit Float?
+  
+  createdAt        DateTime     @default(now())
+  
+  @@map("toxicity")
+}
+
+// Legacy FactCheck model removed 2026-05-23. It was tied to ScrapeResult (news scrape
+// pipeline) and never populated. The live fact-check store is SocialPostFactCheck.
+
+model TrendSnapshot {
+  id             String       @id @default(cuid())
+  campaignId     String
+  campaign       Campaign     @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  
+  period         TrendPeriod
+  timestamp      DateTime
+  
+  // Aggregated metrics
+  articleCount   Int
+  avgSentiment   Float
+  topEntities    Json         // [{text, type, frequency}]
+  topTopics      Json         // [{label, frequency, avgScore}]
+  avgToxicity    Float?
+  
+  // Trend indicators
+  sentimentShift  Float?      // vs previous period
+  emergingTopics  Json?       // New topics with growth rate
+  
+  createdAt      DateTime     @default(now())
+  
+  @@unique([campaignId, period, timestamp])
+  @@index([campaignId, period, timestamp])
+  @@map("trend_snapshots")
+}
+
+// ============================================
+// SOCIAL SCRAPING MODELS (now using Campaign)
+// ============================================
+
+model SocialPost {
+  id              String          @id @default(cuid())
+  campaignId      String
+  campaign        Campaign        @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  
+  // Post identifiers
+  platformPostId  String          // Original post ID from platform
+  url             String?
+  
+  // Content
+  caption         String?         @db.Text
+  photoUrls       String[]
+  photoOcrTexts   String[]        // OCR extracted text from photos
+  videoUrl        String?
+  
+  // Timing
+  postedAt        DateTime?
+  scrapedAt       DateTime        @default(now())
+  
+  // Engagement counts (for quick access)
+  commentCount    Int             @default(0)
+  shareCount      Int             @default(0)
+  totalReactions  Int             @default(0)
+  saves           Int             @default(0)
+  impressions     Int             @default(0)
+  reach           Int             @default(0)
+  // Video view count (nullable): only set for video posts (postType VIDEO /
+  // MIXED_VIDEO). The FB timeline scrape provides this for free. Used as the
+  // baseline seed when creating the video snapshot (video_snapshots), and to
+  // display current views in the UI. Null for non-video posts.
+  videoViewCount  BigInt?         @map("video_view_count")
+
+  // Analysis
+  sentiment        Float?          // -1 to 1
+  viralPotential   Float?          // 0 to 1
+  autoScrape       Boolean         @default(false)
+  aiAnalysisStatus String?         @default("PENDING") // Legacy column preserved for existing data
+  status           PostStatus      @default(NOT_ANALYZED)
+
+  // === Viral monitoring lifecycle (added for SocialPostSnapshot pipeline) ===
+  // These fields are independent of the existing `status` AI moderation enum.
+  // Existing AI moderation behavior (NOT_ANALYZED -> GOOD/BAD on `status`) is preserved.
+  postType                 String?         // TEXT | PHOTO | PHOTO_TEXT | VIDEO | MIXED_VIDEO
+  hasVideo                 Boolean         @default(false)
+  viralMonitoringStatus    String?         // BASELINE_CREATED | FILTERED_UNSUPPORTED | AI_PENDING | BAD_RETAINED | FOLLOWUP_SCHEDULED | NOT_VIRAL | VIRAL_CANDIDATE | AUTO_SCHEDULED | FULL_MONITORING
+  isViralCandidate         Boolean         @default(false)
+  isViral                  Boolean         @default(false)
+  isAutoScheduled          Boolean         @default(false)
+  scheduledIntervalMinutes Int?
+  lastSnapshotAt           DateTime?
+  nextSnapshotAt           DateTime?
+  badPostExpiresAt         DateTime?
+  // === END viral monitoring lifecycle ===
+
+  // Platform availability. Flips to UNAVAILABLE when the post is detected as
+  // deleted / made private / audience-changed on the platform (e.g. Facebook's
+  // "This content isn't available right now" interstitial). Default AVAILABLE.
+  // Used to stop wasting snapshot scrapes on dead posts.
+  availability             String          @default("AVAILABLE") // AVAILABLE | UNAVAILABLE
+  unavailableAt            DateTime?
+
+  // AI Hybrid Search (added by migration 002_ai_search)
+  searchTsv         Unsupported("tsvector")?      @map("search_tsv")       // Full-text search vector
+  captionEmbedding  Unsupported("vector(1024)")?  @map("caption_embedding") // BGE-M3 semantic embedding
+
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  // Relations
+  comments        PostComment[]
+  shares          PostShare[]
+  reactions       PostReaction[]
+  reactionSummary PostReactionSummary[]
+  scrapeJobs      ScrapeJob[]
+  postAIAnalysis  PostAIAnalysis[]
+  socialPostSnapshots SocialPostSnapshot[]
+  factChecks      SocialPostFactCheck[]
+
+  groupPostCache GroupPostCache[]
+  videoSnapshots VideoSnapshot[]
+
+  @@unique([campaignId, platformPostId])
+  @@index([campaignId])
+  @@index([campaignId, postedAt])
+  @@index([postedAt])
+  @@index([scrapedAt])
+  @@index([viralMonitoringStatus])
+  @@index([isViralCandidate])
+  @@map("social_posts")
+}
+
+model PostComment {
+  id                String          @id @default(cuid())
+  postId            String
+  post              SocialPost      @relation(fields: [postId], references: [id], onDelete: Cascade)
+  campaignId        String?
+  campaign          Campaign?       @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  
+  // Comment identifiers
+  platformCommentId String?         // Original comment ID from platform
+  
+  // Author info
+  authorUsername    String
+  authorUrl         String?
+  authorAvatarUrl   String?
+  commentUrl        String?
+
+  // Content
+  text              String          @db.Text
+  
+  // Analysis
+  sentiment         Float?          // -1 to 1
+  category          CommentCategory @default(NEUTRAL)
+  
+  // Engagement
+  likes             Int             @default(0)
+  replyCount        Int             @default(0)
+  
+  // Filtering
+  isRelevant        Boolean         @default(true)  // For >200 relevant comments filtering
+  relevanceScore    Float?          // 0 to 1, for ranking
+  
+  // Timing
+  postedAt          DateTime?
+  scrapedAt         DateTime        @default(now())
+  
+  // Nested replies (self-referencing)
+  parentId          String?
+  parent            PostComment?    @relation("CommentReplies", fields: [parentId], references: [id], onDelete: SetNull)
+  replies           PostComment[]   @relation("CommentReplies")
+  feedbacks         ProfileFeedback[]
+  
+  createdAt         DateTime        @default(now())
+  
+  @@unique([postId, platformCommentId])
+  @@index([postId])
+  @@index([campaignId])
+  @@index([parentId])
+  @@index([isRelevant])
+  @@index([postedAt])
+  @@index([campaignId, postedAt])
+  @@map("post_comments")
+}
+
+model PostShare {
+  id                String          @id @default(cuid())
+  postId            String
+  post              SocialPost      @relation(fields: [postId], references: [id], onDelete: Cascade)
+  
+  // Sharer info
+  sharerUsername    String
+  sharerUrl         String?
+  sharerAvatarUrl   String?
+  
+  // Optional link to tracked campaign if sharer is being monitored
+  sharerCampaignId  String?
+  sharerCampaign    Campaign?       @relation("SharerProfile", fields: [sharerCampaignId], references: [id], onDelete: SetNull)
+  
+  // Share details
+  shareText         String?         @db.Text  // Any text added when sharing
+  sharedAt          DateTime?
+  scrapedAt         DateTime        @default(now())
+  feedbacks         ProfileFeedback[]
+  
+  createdAt         DateTime        @default(now())
+  
+  @@index([postId])
+  @@index([sharerCampaignId])
+  @@index([sharedAt])
+  @@map("post_shares")
+}
+
+model PostReaction {
+  id                String          @id @default(cuid())
+  postId            String
+  post              SocialPost      @relation(fields: [postId], references: [id], onDelete: Cascade)
+  
+  // Reaction info
+  reactionType      ReactionType
+  
+  // Reactor info
+  reactorUsername   String
+  reactorUrl        String?
+  reactorAvatarUrl  String?
+  
+  // Optional link to tracked campaign if reactor is being monitored
+  reactorCampaignId String?
+  reactorCampaign   Campaign?       @relation("ReactorProfile", fields: [reactorCampaignId], references: [id], onDelete: SetNull)
+  
+  // Timing
+  reactedAt         DateTime?
+  scrapedAt         DateTime        @default(now())
+  
+  createdAt         DateTime        @default(now())
+  
+  @@unique([postId, reactorUsername, reactionType])
+  @@index([postId])
+  @@index([reactionType])
+  @@index([reactorCampaignId])
+  @@map("post_reactions")
+}
+
+model PostReactionSummary {
+  id            String        @id @default(cuid())
+  postId        String
+  post          SocialPost    @relation(fields: [postId], references: [id], onDelete: Cascade)
+  
+  reactionType  ReactionType
+  count         Int           @default(0)
+  
+  updatedAt     DateTime      @updatedAt
+  
+  @@unique([postId, reactionType])
+  @@index([postId])
+  @@map("post_reaction_summaries")
+}
+
+// ============================================
+// SOCIAL POST SNAPSHOT (engagement velocity / viral monitoring)
+// ============================================
+// Snapshots store point-in-time engagement metrics for a SocialPost.
+// Snapshot rank=1 (BASELINE) is created right after the existing post save
+// flow succeeds; later ranks are created by lightweight metrics refresh jobs.
+// This model is additive only and does not replace any existing table.
+model SocialPostSnapshot {
+  id                 String      @id @default(cuid())
+  socialPostId       String
+  socialPost         SocialPost  @relation(fields: [socialPostId], references: [id], onDelete: Cascade)
+
+  rank               Int         // 1, 2, 3 ...
+  stage              String      // BASELINE | FOLLOWUP_1 | FOLLOWUP_2 | FOLLOWUP_3 | SCHEDULED
+
+  // Absolute counts at snapshot time
+  reactionCount      Int         @default(0)
+  commentCount       Int         @default(0)
+  shareCount         Int         @default(0)
+  reactionSummary    Json?       // Optional reaction-type breakdown (e.g. { LIKE: 100, LOVE: 12, ... })
+
+  engagementRate     Float       @default(0)
+
+  // Comparison fields (null on rank=1)
+  previousSnapshotId String?
+  reactionDelta      Int?
+  commentDelta       Int?
+  shareDelta         Int?
+  timeDiffMinutes    Float?
+  reactionPerMinute  Float?
+  commentPerMinute   Float?
+  sharePerMinute     Float?
+
+  // Decision output
+  viralScore         Float?
+  isViralCandidate   Boolean     @default(false)
+
+  // Timing
+  scrapedAt          DateTime
+  createdAt          DateTime    @default(now())
+  updatedAt          DateTime    @updatedAt
+
+  @@unique([socialPostId, rank])
+  @@index([socialPostId])
+  @@index([scrapedAt])
+  @@index([isViralCandidate])
+  @@map("social_post_snapshots")
+}
+
+
+
+
+
+  // ── Capture state / provenance ──────────────────────────────────────────────
+
+
+// ============================================
+// NEWS HEADLINES
+// ============================================
+
+model NewsHeadline {
+  id              String          @id @default(cuid())
+  
+  // Core headline data
+  title           String          @db.Text
+  url             String
+  source          String          // e.g. "Reuters", "Bloomberg", "Al Jazeera"
+  sourceUrl       String?         // Source website base URL
+  sourceLogo      String?         // Logo URL for the source
+  author          String?
+  
+  // Content
+  summary         String?         @db.Text
+  imageUrl        String?
+  category        String?         // e.g. "Politics", "Technology", "Business"
+  
+  // Deduplication
+  contentHash     String          @unique // SHA-256 hash of title+url for dedup
+  
+  // Timing
+  publishedAt     DateTime?       // When the article was published
+  scrapedAt       DateTime        @default(now()) // When we scraped it
+  
+  // Classification & Analysis
+  sentiment       Float?          // -1 to 1
+  isBreaking      Boolean         @default(false)
+  priority        Int             @default(0)  // Higher = more important
+  tags            String[]        @default([])
+  region          String?         // Geographic region
+  language        String?         @default("en")
+  
+  // Keyword matching
+  matchedKeywords String[]        @default([])
+  
+  // Optional link to campaign / scrape job
+  campaignId      String?
+  campaign        Campaign?       @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+  
+  // Optional link to full scrape result for detailed analysis
+  scrapeResultId  String?         @unique
+  scrapeResult    ScrapeResult?   @relation(fields: [scrapeResultId], references: [id], onDelete: SetNull)
+  
+  // AI Hybrid Search (added by migration 002_ai_search)
+  searchTsv         Unsupported("tsvector")?      @map("search_tsv")      // Full-text search vector
+  contentEmbedding  Unsupported("vector(1024)")?  @map("content_embedding") // BGE-M3 semantic embedding
+
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  @@index([source])
+  @@index([category])
+  @@index([publishedAt])
+  @@index([scrapedAt])
+  @@index([isBreaking])
+  @@index([campaignId])
+  @@index([priority])
+  @@index([region])
+  @@map("news_headlines")
+}
+
+model ProfileSnapshot {
+  id              String          @id @default(cuid())
+  campaignId      String
+  campaign        Campaign        @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  
+  // Metrics at snapshot time
+  followers       Int
+  following       Int
+  postsCount      Int
+  engagementRate  Float
+  
+  // Delta tracking (change from previous snapshot)
+  followersDelta     Int?           // Change in followers since last snapshot
+  followingDelta     Int?           // Change in following since last snapshot
+  postsCountDelta    Int?           // Change in posts since last snapshot
+  engagementRateDelta Float?        // Change in engagement rate
+  
+  // Growth rate (percentage)
+  followersGrowthRate Float?        // Percentage change in followers
+  
+  // Additional metrics
+  avgLikes        Float?
+  avgComments     Float?
+  avgShares       Float?
+  
+  // Timing
+  snapshotAt      DateTime        @default(now())
+  
+  @@index([campaignId])
+  @@index([snapshotAt])
+  @@index([campaignId, snapshotAt])
+  @@map("profile_snapshots")
+}
+
+model FollowerAnalytics {
+  id              String          @id @default(cuid())
+  campaignId      String
+  campaign        Campaign        @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  
+  // Time period
+  periodType      AnalyticsPeriod // HOURLY, DAILY, WEEKLY, MONTHLY, YEARLY
+  periodStart     DateTime        // Start of the period
+  periodEnd       DateTime        // End of the period
+  
+  // Follower metrics for this period
+  startFollowers  Int             // Followers at period start
+  endFollowers    Int             // Followers at period end
+  netChange       Int             // Net change (endFollowers - startFollowers)
+  gained          Int             @default(0) // New followers gained
+  lost            Int             @default(0) // Followers lost
+  
+  // Growth metrics
+  growthRate      Float           // Percentage change
+  growthVelocity  Float?          // Rate of change per day
+  
+  // Comparative metrics
+  avgDailyGrowth  Float?          // Average daily growth in this period
+  peakFollowers   Int?            // Highest follower count in period
+  lowestFollowers Int?            // Lowest follower count in period
+  
+  // Additional engagement metrics for context
+  avgEngagementRate Float?
+  totalPosts      Int             @default(0)
+  
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+  
+  @@unique([campaignId, periodType, periodStart])
+  @@index([campaignId])
+  @@index([periodType])
+  @@index([periodStart])
+  @@index([campaignId, periodType, periodStart])
+  @@map("follower_analytics")
+}
+
+// ============================================
+// AI ANALYSIS SYSTEM (Async Request/Webhook)
+// ============================================
+
+enum AIAnalysisType {
+  PROFILE
+  POST
+  NEWS
+  FACT_CHECK
+  VIDEO
+}
+
+enum AIAnalysisStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+  EXPIRED
+}
+
+model AIAnalysisRequest {
+  id              String            @id @default(cuid())
+  
+  // Request type
+  analysisType    AIAnalysisType
+  status          AIAnalysisStatus  @default(PENDING)
+  
+  // Reference IDs (one of these will be set based on analysisType)
+  campaignId      String?           // For PROFILE analysis
+  campaign        Campaign?         @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  postId          String?           // For POST analysis
+  newsQueryParams Json?             // For NEWS analysis (search params, date range, etc.)
+  factCheckContext Json?            // For FACT_CHECK analysis (top sources + trigger metadata)
+  
+  // External AI integration
+  externalRequestId String?         // ID returned by external AI service
+  callbackUrl     String?           // Webhook URL for the external AI to call back
+  
+  // API reference for external AI to fetch data
+  dataApiUrl      String?           @db.Text  // The API URL external AI should use to fetch data
+  responsePayload Json?             // Stores callback response payload for transient UI consumption
+  
+  // Error handling
+  errorMessage    String?           @db.Text
+  retryCount      Int               @default(0)
+  maxRetries      Int               @default(3)
+  
+  // Timing
+  requestedAt     DateTime          @default(now())
+  processingAt    DateTime?         // When external AI started processing
+  completedAt     DateTime?         // When results were received
+  expiresAt       DateTime?         // Request expiration
+  
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  
+  // Inverse: a FACT_CHECK run produces one persisted SocialPostFactCheck row
+  factCheckResult SocialPostFactCheck?
+  
+  @@index([analysisType])
+  @@index([status])
+  @@index([campaignId])
+  @@index([postId])
+  @@index([externalRequestId])
+  @@map("ai_analysis_requests")
+}
+
+/// Persisted fact-check results for social posts. One row per AI run; the most
+/// recent run for a post is marked isLatest=true (maintained transactionally).
+/// History is preserved so the verdict timeline can be inspected over time.
+model SocialPostFactCheck {
+  id                  String            @id @default(cuid())
+  postId              String
+  post                SocialPost        @relation(fields: [postId], references: [id], onDelete: Cascade)
+  analysisRequestId   String?           @unique
+  analysisRequest     AIAnalysisRequest? @relation(fields: [analysisRequestId], references: [id], onDelete: SetNull)
+  
+  // Verdict + scores
+  verdict             String            // true | partially_verified | misleading | unverified | not_fact_checkable
+  overallScore        Int               // 0-100
+  confidence          Int               // 0-100
+  summary             String            @db.Text
+  
+  // Per-metric scores (columns so dashboards can filter without JSON ops)
+  sourceCredibility   Int
+  contentConsistency  Int
+  factualAccuracy     Int
+  biasDetection       Int
+  
+  // Sources + per-source AI reviews (full evidence chain, replayable)
+  articleReviews      Json              // [{ id, originalMatchScore, aiMatchScore, finalMatchScore, verdict, role, reason }, ...]
+  sourcesFingerprint  String            // sha1(sorted source IDs) — cache key for "same evidence set"
+  sourceCount         Int
+  
+  // Claim package snapshot (what we asked the AI)
+  claimText           String            @db.Text
+  claimType           String            // factual_event | policy_statement | quote_or_attribution | opinion_or_reaction | personal_or_greeting
+  factCheckable       Boolean
+  
+  // History bookkeeping
+  isLatest            Boolean           @default(true)
+  triggeredBy         String?           // auto | manual_rerun | <x-user-id>
+  createdAt           DateTime          @default(now())
+  
+  @@index([postId, isLatest])
+  @@index([postId, createdAt(sort: Desc)])
+  @@index([verdict])
+  @@map("social_post_fact_checks")
+}
+
+model ProfileAIAnalytics {
+  id              String          @id @default(cuid())
+  campaignId      String
+  campaign        Campaign        @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  
+  // Analysis metadata
+  lastAnalyzedAt  DateTime        @default(now())
+  
+  // Profile Summary
+  profileSummary  String          @db.Text
+  topic           String?         // Main topic/theme of the profile
+  
+  // Next Post Prediction
+  nextPostContentType      String?
+  nextPostLikelyTopic      String?         @db.Text
+  nextPostContentStyle     String?
+  nextPostTimingPrediction String?
+  nextPostPredictedSample  String?         @db.Text
+  
+  // Engagement Prediction
+  expectedLikesMin         Int?
+  expectedLikesMax         Int?
+  expectedCommentsMin      Int?
+  expectedCommentsMax      Int?
+  expectedSharesMin        Int?
+  expectedSharesMax        Int?
+  engagementRateMin        Float?
+  engagementRateMax        Float?
+  viralPotential           String?         // LOW, MEDIUM, HIGH, VERY_HIGH
+  
+  // Content Analysis
+  mainThemes               String[]        @default([])
+  engagementTriggers       String[]        @default([])
+  languageStyle            String?
+  
+  // Audience Insights
+  audienceDemographics     Json?           // Flexible JSON for demographics breakdown
+  activeHours              String[]        @default([])
+  topLocations             String[]        @default([])
+  
+  // Overall Sentiment
+  sentimentScore           Int?            // 0-100
+  sentimentLabel           String?         // POSITIVE, NEGATIVE, NEUTRAL, MIXED
+  sentimentBreakdown       Json?           // {positive: 68, neutral: 25, negative: 7}
+  
+  // Viral Potential Analysis
+  viralPotentialScore      Int?            // 0-100
+  viralFactors             String[]        @default([])
+  
+  // Best Posting Time
+  bestPostingTime          String?
+  suggestedTopics          String[]        @default([])
+  expectedEngagement       String?
+  
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+  
+  @@index([campaignId])
+  @@index([lastAnalyzedAt])
+  @@map("profile_ai_analytics")
+}
+
+model PostAIAnalysis {
+  id              String          @id @default(cuid())
+  postId          String
+  post            SocialPost      @relation(fields: [postId], references: [id], onDelete: Cascade)
+  
+  // Analysis metadata
+  lastAnalyzedAt  DateTime        @default(now())
+  
+  // Post Summary
+  summary         String          @db.Text
+
+  // Single-sentence Bengali rationale: WHY this post is viral. Combines
+  // content (topic / emotional weight) with comparative signal (velocity
+  // vs channel baseline, share-to-reaction ratio). Surfaced in the
+  // Investigation / viral-posts cards as the lead "Why this is viral?" line.
+  viralityRationale String?        @db.Text
+
+  // Overall Sentiment
+  sentimentScore       Float?     // -1 to 1 or 0-100
+  sentimentLabel       String?    // POSITIVE, NEGATIVE, NEUTRAL, MIXED
+  sentimentBreakdown   Json?      // {positive: 60, neutral: 25, negative: 15}
+  
+  // Viral Potential
+  viralPotentialScore  Float?     // 0 to 100
+  viralPotentialLabel  String?    // LOW, MEDIUM, HIGH, VIRAL
+  viralFactors         Json?      // [{factor, impact, description}, ...]
+  
+  // Audience Insights
+  audienceDemographics Json?      // {techProfessionals: 45, founders: 20, developers: 25, other: 10}
+  activeHours          String[]   @default([])  // Peak engagement hours
+  topLocations         String[]   @default([])
+  
+  // Content Analysis
+  mainThemes           String[]   @default([])
+  engagementTriggers   String[]   @default([])
+  keywords             String[]   @default([])
+  languageStyle        String?
+  toneAnalysis         String?    // Informative, Persuasive, Emotional, etc.
+  
+  // Engagement Prediction
+  expectedLikes        Int?
+  expectedComments     Int?
+  expectedShares       Int?
+  engagementRate       Float?
+  
+  // AI Recommendations
+  aiRecommendations    Json?      // {intro, concerns: [{title, description}], proposedActions: [...]}
+  
+  // Risk Assessment
+  riskAssessment       Json?      // {overallRisk, riskScore, categories: [{category, level, score}]}
+  
+  // Detected Entities
+  detectedEntities     Json?      // {organizations: [], people: [], topics: [], locations: []}
+  
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+  
+  @@index([postId])
+  @@index([lastAnalyzedAt])
+  @@map("post_ai_analysis")
+}
+
+model NewsAIAnalysis {
+  id              String          @id @default(cuid())
+  
+  // Article reference (optional — null for aggregate/bulk analysis)
+  articleId       String?
+  article         NewsArticle?    @relation(fields: [articleId], references: [id], onDelete: Cascade)
+
+  // Analysis metadata
+  lastAnalyzedAt  DateTime        @default(now())
+  analysisScope   String?         // "daily", "weekly", "custom", "category:politics"
+  
+  // Query params used for this analysis
+  queryParams     Json?           // {startDate, endDate, category, source, search}
+  
+  // Overall Sentiment Analysis
+  overallSentimentScore  Float?   // -1 to 1 or 0-100
+  overallSentimentLabel  String?  // POSITIVE, NEGATIVE, NEUTRAL, MIXED
+  sentimentBreakdown     Json?    // {positive: 40, neutral: 35, negative: 25}
+  sentimentByCategory    Json?    // {politics: {score, label}, tech: {score, label}, ...}
+  sentimentBySource      Json?    // {bbc: {score, label}, cnn: {score, label}, ...}
+  
+  // Trending Keywords
+  trendingKeywords       Json?    // [{keyword, count, trend, sentiment}, ...]
+  emergingTopics         String[] @default([])
+  decliningTopics        String[] @default([])
+  
+  // Topic Analysis
+  topTopics              Json?    // [{topic, articleCount, avgSentiment}, ...]
+  topicClusters          Json?    // Grouped related topics
+  
+  // Key Insights
+  summary                String?  @db.Text  // AI-generated summary of news landscape
+  keyFindings            String[] @default([])
+  alerts                 Json?    // [{type, message, severity}, ...]
+  
+  // Detailed Analysis
+  detailedInsights       String?  @db.Text  // Comprehensive multi-paragraph analysis
+  potentialBiases        String?  @db.Text  // Detected biases in sources
+  recommendations        String[] @default([])  // Actionable recommendations
+  articleStats           Json?    // {totalArticles, analyzedArticles, positiveArticles, negativeArticles, neutralArticles}
+  
+  // Source Analysis
+  sourceReliability      Json?    // {source: reliabilityScore, ...}
+  sourceBreakdown        Json?    // {source: articleCount, ...}
+
+  // Country-to-country relation extraction when present in article context
+  relation               Json?    // {from: "bangladesh", to: "usa"}
+  
+  // Temporal Analysis
+  volumeTrend            Json?    // [{date, count}, ...] article volume over time
+  sentimentTrend         Json?    // [{date, sentiment}, ...] sentiment over time
+  
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+  
+  @@index([lastAnalyzedAt])
+  @@index([analysisScope])
+  @@index([articleId])
+  @@index([overallSentimentLabel])
+  @@map("news_ai_analysis")
+}
+
+model NewsDashboardSnapshot {
+  id                        String    @id @default(cuid())
+  userId                    String
+  mode                      String    // "ai" | "legacy"
+  viewKey                   String    // "all" | "electronic" | mediaId | custom hash
+  viewLabel                 String?
+  sourceType                String?   // "general" | "electronic" | "mixed"
+  campaignIds               String[]  @default([])
+  isDirty                   Boolean   @default(true)
+  lastCalculatedAt          DateTime?
+  refreshAfterAt            DateTime?
+  totalAnalyzedArticles     Int       @default(0)
+  topKeywords               Json?
+  topKeywordNews            Json?
+  topKeywordLeadNews        Json?
+  sourceKeywordCoverageData Json?
+  sessionDistribution       Json?
+  campaignKeywordMap        Json?
+  metadata                  Json?
+  createdAt                 DateTime  @default(now())
+  updatedAt                 DateTime  @updatedAt
+
+  @@unique([userId, mode, viewKey])
+  @@index([userId, mode])
+  @@index([isDirty, refreshAfterAt])
+  @@index([lastCalculatedAt])
+  @@map("news_dashboard_snapshots")
+}
+
+model NewsDashboardSnapshotV2 {
+  id                   String   @id @default(cuid())
+  snapshotAt           DateTime @default(now())
+  windowStart          DateTime
+  windowEnd            DateTime
+  totalArticles        Int      @default(0)
+  systemData           Json?
+  aiAnalysisData       Json?
+  worldRelationData    Json?
+  metadata             Json?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  @@index([snapshotAt])
+  @@index([windowStart])
+  @@index([windowEnd])
+  @@map("news_dashboard_snapshots_v2")
+}
+
+model NewsTickerCycle {
+  id        String   @id @default(cuid())
+  cycleDate String   @unique
+  startsAt  DateTime
+  endsAt    DateTime?
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  items   NewsTickerItem[]
+  cursors NewsTickerCursor[]
+
+  @@index([isActive])
+  @@index([startsAt])
+  @@map("news_ticker_cycles")
+}
+
+model NewsTickerItem {
+  id              String         @id @default(cuid())
+  cycleId         String
+  cycle           NewsTickerCycle @relation(fields: [cycleId], references: [id], onDelete: Cascade)
+  tickerType      NewsTickerType
+  sourceKey       String?
+  sourceName      String
+  sourceLogo      String?
+  title           String
+  url             String?
+  publishedAt     DateTime?
+  publishedDateBn String?
+  publishedTimeBn String?
+  rank            Int
+  contentHash     String
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  @@unique([cycleId, tickerType, contentHash], map: "uniq_ticker_item_hash_per_cycle")
+  @@unique([cycleId, tickerType, rank], map: "uniq_ticker_item_rank_per_cycle")
+  @@index([cycleId, tickerType, rank])
+  @@index([tickerType, createdAt])
+  @@map("news_ticker_items")
+}
+
+model NewsTickerCursor {
+  id             String          @id @default(cuid())
+  cycleId        String
+  cycle          NewsTickerCycle @relation(fields: [cycleId], references: [id], onDelete: Cascade)
+  tickerType     NewsTickerType
+  lastServedRank Int             @default(0)
+  totalItems     Int             @default(0)
+  updatedAt      DateTime        @updatedAt
+  createdAt      DateTime        @default(now())
+
+  @@unique([cycleId, tickerType], map: "uniq_ticker_cursor_per_cycle")
+  @@index([tickerType, updatedAt])
+  @@map("news_ticker_cursors")
+}
+
+model SocialDashboardSnapshot {
+  id               String   @id @default(cuid())
+  viewKey          String
+  platform         String?
+  status           String?
+  profileType      String?
+  groupId          String?
+  search           String?
+  dateFrom         DateTime?
+  dateTo           DateTime?
+  isDirty          Boolean  @default(true)
+  lastCalculatedAt DateTime?
+  refreshAfterAt   DateTime?
+  latestPosts      Json?
+  keywordThemes    Json?
+  metadata         Json?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@index([viewKey])
+  @@index([platform])
+  @@index([isDirty, refreshAfterAt])
+  @@index([lastCalculatedAt])
+  @@map("social_dashboard_snapshots")
+}
+
+model AiSituationCache {
+  id                 String   @id @default(cuid())
+  cacheKey           String   @unique
+  platform           String?
+  groupId            String?
+  campaignIds        Json?
+  hoursBack          Int
+  limit              Int
+  windowStart        DateTime?
+  windowEnd          DateTime?
+  analyzedPosts      Int      @default(0)
+  summaryLines       Json?
+  executiveSummary   String?  @db.Text
+  narrativeHighlights Json?
+  riskHighlights     Json?
+  attentionPoints    Json?
+  sentiment          Json?
+  narratives         Json?
+  risk               Json?
+  watchlist          Json?
+  postsUsed          Json?
+  metadata           Json?
+  aiProvider         String?
+  aiModel            String?
+  promptVersion      String?
+  lastGeneratedAt    DateTime?
+  refreshAfterAt     DateTime?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@index([platform])
+  @@index([groupId])
+  @@index([hoursBack])
+  @@index([lastGeneratedAt])
+  @@index([refreshAfterAt])
+  @@map("ai_situation_cache")
+}
+
+// ============================================
+// LIVE TV CHANNELS
+// ============================================
+
+model LiveChannel {
+  id          String   @id @default(cuid())
+  name        String
+  url         String
+  category    String
+  country     String
+  isEmbed     Boolean  @default(true)
+  status      String   @default("live")
+  logoUrl     String?
+  description String?  @db.Text
+  language    String?
+  isActive    Boolean  @default(true)
+  sortOrder   Int      @default(0)
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  @@index([category])
+  @@index([country])
+  @@index([isActive])
+  @@index([sortOrder])
+  @@map("live_channels")
+}
+
+model ProfileFeedback {
+  id         String             @id @default(cuid())
+  targetType FeedbackTargetType
+  targetId   String
+  type       String
+  comment    String             @db.Text
+
+  campaign   Campaign?    @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  campaignId String?
+  commentRef PostComment? @relation(fields: [commentId], references: [id], onDelete: Cascade)
+  commentId  String?
+  shareRef   PostShare?   @relation(fields: [shareId], references: [id], onDelete: Cascade)
+  shareId    String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([targetType, targetId])
+  @@map("profile_feedback")
+}
+
+// ============================================
+// VIDEO INTELLIGENCE
+// ============================================
+
+enum VideoKind {
+  GENERAL
+  TALK_SHOW
+  LIVE
+}
+
+enum VideoIngestionMethod {
+  CAMPAIGN_SCRAPE
+  DIRECT_LINK
+  FILE_UPLOAD
+}
+
+enum VideoAnalysisStatus {
+  NOT_SENT
+  QUEUED
+  ANALYZING
+  COMPLETED
+  FAILED
+}
+
+enum VideoAiJobStatus {
+  QUEUED
+  RUNNING
+  COMPLETED
+  FAILED
+}
+
+enum SegmentSentiment {
+  POSITIVE
+  NEUTRAL
+  NEGATIVE
+}
+
+enum RedFlagSeverity {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+model VideoKeyword {
+  id        String    @id @default(cuid())
+  keyword   String
+  category  String
+  videoKind VideoKind @default(GENERAL) @map("video_kind")
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  @@unique([keyword, category, videoKind])
+  @@index([category])
+  @@index([videoKind])
+  @@map("video_keywords")
+}
+
+
+
+// ============================================
+// GROUP POST CACHE (precomputed intelligence)
+// ============================================
+
+model GroupPostCache {
+  id             String          @id @default(cuid())
+  groupId        String
+  group          Group           @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  postId         String
+  post           SocialPost      @relation(fields: [postId], references: [id], onDelete: Cascade)
+  rankType       PostRankType
+  rank           Int             // 1-based position within the rank category
+  score          Float           @default(0)
+
+  // Profile / Campaign context
+  profileId      String?         // campaignId of the profile that owns this post
+  platform       ScrapePlatform? // e.g. FACEBOOK, TWITTER, LINKEDIN, TELEGRAM
+
+  // Cached engagement metrics (snapshot at compute time)
+  likesCount     Int             @default(0)
+  commentsCount  Int             @default(0)
+  engagementRate Float           @default(0)
+
+  computedAt     DateTime        @default(now())
+
+  @@unique([groupId, rankType, rank])
+  @@index([groupId, rankType])
+  @@index([postId])
+  @@index([profileId])
+  @@index([platform])
+  @@index([computedAt])
+  @@map("group_post_cache")
+}
+
+model Video {
+  id              String              @id @default(cuid())
+  kind            VideoKind           @default(GENERAL)
+  platform        ScrapePlatform      @default(YOUTUBE)
+  externalVideoId String?             @map("external_video_id")
+  url             String?
+  title           String
+  channelId       String              @map("channel_id")
+  channelTitle    String?             @map("channel_title")
+  channelLogoUrl  String?             @map("channel_logo_url")
+  thumbnailUrl    String?             @map("thumbnail_url")
+  durationSeconds Int?                @map("duration_seconds")
+  publishedAt     DateTime?           @map("published_at")
+  viewCount       BigInt              @default(0) @map("view_count")
+  likeCount       BigInt              @default(0) @map("like_count")
+  commentCount    BigInt              @default(0) @map("comment_count")
+  summary            String?             @db.Text
+  matchedKeywordIds  String[]            @default([]) @map("matched_keyword_ids")
+  analysisStatus     VideoAnalysisStatus @default(NOT_SENT) @map("analysis_status")
+  ingestionMethod VideoIngestionMethod @default(CAMPAIGN_SCRAPE) @map("ingestion_method")
+  storageUrl      String?             @map("storage_url")
+  campaignId      String?             @map("campaign_id")
+  campaign        Campaign?           @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  sourceId        String?             @map("source_id")
+  source          VideoSource?        @relation(fields: [sourceId], references: [id], onDelete: SetNull)
+  scrapedAt       DateTime            @default(now()) @map("scraped_at")
+  analyzedAt      DateTime?           @map("analyzed_at")
+  createdAt       DateTime            @default(now()) @map("created_at")
+  updatedAt       DateTime            @updatedAt @map("updated_at")
+
+  // ── Video viral-monitoring lifecycle (YouTube videos live here, not in
+  // social_post). Mirrors the SocialPost viral fields so the video snapshot
+  // pipeline can drive baseline → follow-up → recurring auto-schedule → stop /
+  // bad-retain. FB videos use social_post's own fields instead. All nullable /
+  // defaulted so existing rows are unaffected. ──
+  viralMonitoringStatus    String?   @map("viral_monitoring_status") // VIDEO_MONITORING | VIDEO_FOLLOWUP_SCHEDULED | VIDEO_AUTO_SCHEDULED | VIDEO_FULL_MONITORING | VIDEO_NOT_VIRAL | VIDEO_BAD_RETAINED
+  isViralCandidate         Boolean   @default(false) @map("is_viral_candidate")
+  isAutoScheduled          Boolean   @default(false) @map("is_auto_scheduled")
+  scheduledIntervalMinutes Int?      @map("scheduled_interval_minutes")
+  lastSnapshotAt           DateTime? @map("last_snapshot_at")
+  nextSnapshotAt           DateTime? @map("next_snapshot_at")
+  badVideoExpiresAt        DateTime? @map("bad_video_expires_at")
+
+  aiJobs         VideoAiJob[]
+  speakers       VideoSpeaker[]
+  segments       VideoSegment[]
+  topics         VideoTopic[]
+  liveRecordTopics LiveRecordTopic[]
+  snapshots      VideoSnapshot[]
+  scrapeJobs     ScrapeJob[]
+
+  @@unique([campaignId, externalVideoId], map: "yt_campaign_video_unique")
+  @@index([campaignId], map: "yt_campaign_id_idx")
+  @@index([channelId], map: "yt_channel_id_idx")
+  @@index([publishedAt], map: "yt_published_at_idx")
+  @@index([sourceId], map: "yt_source_id_idx")
+  @@index([platform], map: "video_platform_idx")
+  @@index([kind], map: "video_kind_idx")
+  @@index([analysisStatus], map: "video_analysis_status_idx")
+  @@index([ingestionMethod], map: "video_ingestion_method_idx")
+  @@map("videos")
+}
+
+// ============================================
+// VIDEO SNAPSHOTS (engagement time-series)
+// ============================================
+// Time-series engagement history for a video, mirroring social_post_snapshots
+// but widened to cover BOTH Facebook and YouTube video metrics.
+//
+// All three owning references are NULLABLE by design so a snapshot can attach
+// to whatever context it was captured in:
+//   - campaignId   : campaign-scraped video
+//   - socialPostId : a Facebook video that lives in social_post
+//   - videoId      : a row in the videos table (YouTube, or a FB video added
+//                    straight into Video Intel)
+// A standalone "single video" (e.g. a YouTube link with no campaign) can be
+// stored with only videoId set (or even none, keyed purely by platform+
+// externalVideoId), which keeps the pipeline flexible.
+model VideoSnapshot {
+  id             String         @id @default(cuid())
+
+  // Flexible ownership — any combination may be null.
+  campaignId     String?        @map("campaign_id")
+  campaign       Campaign?      @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  socialPostId   String?        @map("social_post_id")
+  socialPost     SocialPost?    @relation(fields: [socialPostId], references: [id], onDelete: Cascade)
+  videoId        String?        @map("video_id")
+  video          Video?         @relation(fields: [videoId], references: [id], onDelete: Cascade)
+
+  // Video identity (lets a snapshot exist without any FK — a lone single video)
+  platform        ScrapePlatform @default(YOUTUBE)
+  externalVideoId String?        @map("external_video_id")
+  sourceUrl       String?        @map("source_url")
+
+  rank           Int            // 1, 2, 3 ...
+  stage          String         @default("BASELINE") // BASELINE | FOLLOWUP_1 | FOLLOWUP_2 | ...
+
+  // ── Absolute counts at snapshot time (superset of both platforms) ──
+  viewCount         BigInt   @default(0) @map("view_count")     // YT viewCount / FB videoViewCount (unique viewers)
+  playCount         BigInt?  @map("play_count")                 // FB total plays; null for YT
+  likeCount         BigInt   @default(0) @map("like_count")     // YT likes / FB total reactions
+  likeCountRyd      BigInt?  @map("like_count_ryd")             // YT returnyoutubedislike like estimate
+  dislikeCount      BigInt?  @map("dislike_count")              // YT only
+  commentCount      BigInt   @default(0) @map("comment_count")
+  shareCount        BigInt?  @map("share_count")                // FB (rounded); null for YT
+  reactionSummary   Json?    @map("reaction_summary")           // FB reaction-type breakdown; null for YT
+  likeCountIsApproximate  Boolean @default(false) @map("like_count_is_approximate")
+  shareCountIsApproximate Boolean @default(false) @map("share_count_is_approximate")
+
+  engagementRate    Float    @default(0) @map("engagement_rate")
+
+  // ── Comparison fields (null on rank=1) ──
+  previousSnapshotId String? @map("previous_snapshot_id")
+  viewDelta          BigInt? @map("view_delta")
+  likeDelta          BigInt? @map("like_delta")
+  commentDelta       BigInt? @map("comment_delta")
+  shareDelta         BigInt? @map("share_delta")
+  timeDiffMinutes    Float?  @map("time_diff_minutes")
+  viewPerMinute      Float?  @map("view_per_minute")
+  likePerMinute      Float?  @map("like_per_minute")     // maps to reactionPerMinute in the post pipeline
+  commentPerMinute   Float?  @map("comment_per_minute")
+  sharePerMinute     Float?  @map("share_per_minute")    // highest-weighted term (x4) in velocity score; FB only
+
+  // ── Decision output ──
+  viralScore         Float?   @map("viral_score")
+  isViralCandidate   Boolean  @default(false) @map("is_viral_candidate")
+
+  // ── Timing ──
+  scrapedAt          DateTime @map("scraped_at")
+  createdAt          DateTime @default(now()) @map("created_at")
+  updatedAt          DateTime @updatedAt @map("updated_at")
+
+  @@index([campaignId])
+  @@index([socialPostId])
+  @@index([videoId])
+  @@index([platform, externalVideoId])
+  @@index([scrapedAt])
+  @@index([isViralCandidate])
+  @@map("video_snapshots")
+}
+
+model VideoTopic {
+  id           String   @id @default(cuid())
+  videoId      String   @map("video_id")
+  video        Video    @relation(fields: [videoId], references: [id], onDelete: Cascade)
+  label        String
+  mentionCount Int      @default(0) @map("mention_count")
+  sortOrder    Int      @default(0) @map("sort_order")
+
+  evidence VideoTopicEvidence[]
+
+  @@unique([videoId, label])
+  @@index([videoId])
+  @@map("video_topics")
+}
+
+model VideoTopicEvidence {
+  id           String       @id @default(cuid())
+  topicId      String       @map("topic_id")
+  topic        VideoTopic   @relation(fields: [topicId], references: [id], onDelete: Cascade)
+  segmentId    String       @map("segment_id")
+  segment      VideoSegment @relation(fields: [segmentId], references: [id], onDelete: Cascade)
+  mentionCount Int          @default(1) @map("mention_count")
+
+  @@unique([topicId, segmentId])
+  @@index([topicId])
+  @@index([segmentId])
+  @@map("video_topic_evidence")
+}
+
+model VideoAiJob {
+  id             String           @id @default(cuid())
+  videoId        String           @map("video_id")
+  video          Video            @relation(fields: [videoId], references: [id], onDelete: Cascade)
+  status         VideoAiJobStatus @default(QUEUED)
+  externalJobId  String?          @unique @map("external_job_id")
+  errorMessage   String?          @map("error_message") @db.Text
+  currentStep    String?          @map("current_step")
+  progressPercent Int?            @map("progress_percent")
+  requestedAt    DateTime         @default(now()) @map("requested_at")
+  startedAt      DateTime?        @map("started_at")
+  completedAt    DateTime?        @map("completed_at")
+
+  @@index([videoId, status])
+  @@map("video_ai_jobs")
+}
+
+model VideoSpeaker {
+  id                 String    @id @default(cuid())
+  videoId            String    @map("video_id")
+  video              Video     @relation(fields: [videoId], references: [id], onDelete: Cascade)
+  speakerKey         String    @map("speaker_key")
+  label              String
+  summary            String?   @db.Text
+  segmentCount       Int       @default(0) @map("segment_count")
+  verifiedAt         DateTime? @map("verified_at")
+  verifiedName       String?   @map("verified_name")
+  organization       String?
+  photoUrl           String?   @map("photo_url")
+  identityCampaignId String?   @map("identity_campaign_id")
+  createdAt          DateTime  @default(now()) @map("created_at")
+
+  images   VideoSpeakerImage[]
+  segments VideoSegment[]
+
+  @@unique([videoId, speakerKey])
+  @@index([videoId])
+  @@index([identityCampaignId])
+  @@map("video_speakers")
+}
+
+model VideoSpeakerImage {
+  id          String       @id @default(cuid())
+  speakerId   String       @map("speaker_id")
+  speaker     VideoSpeaker @relation(fields: [speakerId], references: [id], onDelete: Cascade)
+  imageUrl    String       @map("image_url")
+  timestampMs Int?         @map("timestamp_ms")
+  sortOrder   Int          @default(0) @map("sort_order")
+
+  @@index([speakerId, sortOrder])
+  @@map("video_speaker_images")
+}
+
+model VideoSegment {
+  id           String           @id @default(cuid())
+  videoId      String           @map("video_id")
+  video        Video            @relation(fields: [videoId], references: [id], onDelete: Cascade)
+  segmentIndex Int              @map("segment_index")
+  startMs      Int              @map("start_ms")
+  endMs        Int              @map("end_ms")
+  text         String           @db.Text
+  sentiment       SegmentSentiment
+  speakerId       String?          @map("speaker_id")
+  speaker         VideoSpeaker?    @relation(fields: [speakerId], references: [id], onDelete: SetNull)
+  isRedFlag       Boolean          @default(false) @map("is_red_flag")
+  redFlagSeverity RedFlagSeverity? @map("red_flag_severity")
+  redFlagReason   String?          @db.Text @map("red_flag_reason")
+
+  topicEvidence VideoTopicEvidence[]
+
+  @@unique([videoId, segmentIndex])
+  @@index([videoId, startMs])
+  @@index([speakerId])
+  @@index([videoId, isRedFlag])
+  @@map("video_segments")
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Dynamic Reports System
+// Block-based reports with templates, versions, sharing, collaboration, exports.
+// ──────────────────────────────────────────────────────────────────────────────
+
+enum ReportStatus {
+  DRAFT
+  FINAL
+  ARCHIVED
+}
+
+/// Page orientation honored by the print view (`@page` rule) and the DOCX
+/// section properties on export. Defaults to PORTRAIT.
+enum ReportPageOrientation {
+  PORTRAIT
+  LANDSCAPE
+}
+
+enum ReportTemplateCategory {
+  NEWS
+  SOCIAL
+  COMBINED
+  VIDEO_LIVE
+  PROFILE
+  CUSTOM
+}
+
+enum ReportShareVisibility {
+  PUBLIC
+  TEAM
+}
+
+enum ReportCollaboratorRole {
+  EDITOR
+  VIEWER
+}
+
+enum ReportExportFormat {
+  PDF
+  DOCX
+}
+
+enum ReportExportStatus {
+  PENDING
+  RUNNING
+  COMPLETED
+  FAILED
+}
+
+model ReportTemplate {
+  id           String                 @id @default(cuid())
+  userId       String?
+  name         String
+  description  String?
+  category        ReportTemplateCategory @default(CUSTOM)
+  language        String                 @default("en")
+  pageOrientation ReportPageOrientation  @default(PORTRAIT)
+  pageMarginTopCm    Float               @default(1.0)
+  pageMarginRightCm  Float               @default(1.0)
+  pageMarginBottomCm Float               @default(1.0)
+  pageMarginLeftCm   Float               @default(1.0)
+  isSystem        Boolean                @default(false)
+  blocks          Json
+  thumbnailUrl    String?
+  tags            String[]               @default([])
+  createdAt       DateTime               @default(now())
+  updatedAt       DateTime               @updatedAt
+
+  user    User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  reports Report[]
+
+  @@index([userId])
+  @@index([category])
+  @@map("report_templates")
+}
+
+model Report {
+  id               String       @id @default(cuid())
+  userId           String
+  templateId       String?
+  name             String
+  description      String?
+  status              ReportStatus          @default(DRAFT)
+  blocks              Json
+  resolvedSnapshot    Json?
+  language            String                @default("en")
+  pageOrientation     ReportPageOrientation @default(PORTRAIT)
+  pageMarginTopCm     Float                 @default(1.0)
+  pageMarginRightCm   Float                 @default(1.0)
+  pageMarginBottomCm  Float                 @default(1.0)
+  pageMarginLeftCm    Float                 @default(1.0)
+  currentVersionId    String?
+  /// Persisted report-level date filter (YYYY-MM-DD). Used by data
+  /// blocks as the default date range when resolving live data.
+  reportDateFrom      String?
+  reportDateTo        String?
+  publishedAt         DateTime?
+  /// Optional cron expression (e.g. "0 8 * * 0"). When set, a BullMQ
+  /// repeatable job re-publishes the report on this schedule.
+  cronSchedule     String?
+  scheduleLastFiredAt DateTime?
+  /// Soft-delete timestamp. When set, the report is in the trash bin
+  /// and excluded from normal list/get queries. Permanently deleted
+  /// via a separate hard-delete endpoint.
+  deletedAt        DateTime?
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  user          User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  template      ReportTemplate?       @relation(fields: [templateId], references: [id], onDelete: SetNull)
+  versions      ReportVersion[]
+  shareLinks    ReportShareLink[]
+  collaborators ReportCollaborator[]
+  exports       ReportExport[]
+  auditEvents   ReportAuditEvent[]
+
+  @@index([userId, status])
+  @@index([templateId])
+  @@index([deletedAt])
+  @@map("reports")
+}
+
+model ReportVersion {
+  id        String   @id @default(cuid())
+  reportId  String
+  authorId  String
+  versionNo Int
+  blocks    Json
+  summary   String?
+  createdAt DateTime @default(now())
+
+  report Report @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  author User   @relation("ReportVersionAuthor", fields: [authorId], references: [id], onDelete: Cascade)
+
+  @@unique([reportId, versionNo])
+  @@index([reportId, createdAt])
+  @@map("report_versions")
+}
+
+model ReportShareLink {
+  id           String                @id @default(cuid())
+  reportId     String
+  token        String                @unique @default(uuid())
+  visibility   ReportShareVisibility @default(PUBLIC)
+  createdBy    String
+  expiresAt    DateTime?
+  revokedAt    DateTime?
+  createdAt    DateTime              @default(now())
+  /// bcrypt hash of an optional access password. When set, the share
+  /// endpoint requires a matching password in the X-Share-Password header.
+  passwordHash String?
+  /// Incremented each time the share link is successfully resolved.
+  viewCount    Int                   @default(0)
+  lastViewedAt DateTime?
+
+  report Report @relation(fields: [reportId], references: [id], onDelete: Cascade)
+
+  @@index([reportId])
+  @@map("report_share_links")
+}
+
+model ReportCollaborator {
+  id        String                 @id @default(cuid())
+  reportId  String
+  userId    String
+  role      ReportCollaboratorRole @default(VIEWER)
+  addedBy   String
+  createdAt DateTime               @default(now())
+
+  report Report @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([reportId, userId])
+  @@index([userId])
+  @@map("report_collaborators")
+}
+
+model ReportExport {
+  id          String             @id @default(cuid())
+  reportId    String
+  format      ReportExportFormat
+  status      ReportExportStatus @default(PENDING)
+  requestedBy String
+  fileUrl     String?
+  errorMsg    String?
+  createdAt   DateTime           @default(now())
+  finishedAt  DateTime?
+
+  report Report @relation(fields: [reportId], references: [id], onDelete: Cascade)
+
+  @@index([reportId, status])
+  @@map("report_exports")
+}
+
+enum ReportAuditAction {
+  CREATE
+  READ
+  UPDATE
+  DELETE
+  PUBLISH
+  FORK
+  RESTORE_VERSION
+  EXPORT_PDF
+  EXPORT_DOCX
+  SHARE_CREATE
+  SHARE_REVOKE
+  SHARE_VIEW
+  COLLAB_ADD
+  COLLAB_REMOVE
+  COLLAB_ROLE_CHANGE
+  SCHEDULE_SET
+  SCHEDULE_CLEAR
+  SCHEDULE_FIRE
+  AI_SUMMARY
+}
+
+/// Append-only audit trail for every consequential action against a report.
+/// Required for the intel-tool deployment so every read/edit/share/export
+/// can be reconstructed after the fact.
+model ReportAuditEvent {
+  id        String            @id @default(cuid())
+  reportId  String
+  /// Null for system actions (scheduled publish) or anonymous share views.
+  actorId   String?
+  action    ReportAuditAction
+  /// Free-form structured detail — target user id (for collab), share token,
+  /// version no (for restore), export format, etc.
+  metadata  Json?
+  ipAddress String?
+  userAgent String?
+  createdAt DateTime          @default(now())
+
+  report Report @relation(fields: [reportId], references: [id], onDelete: Cascade)
+
+  @@index([reportId, createdAt])
+  @@index([actorId, createdAt])
+  @@index([action, createdAt])
+  @@map("report_audit_events")
+}
+
+// ============================================
+// REPORT TAXONOMY — user-editable category / topic-group / source-
+// group definitions the report-builder consumes. Initially seeded
+// from the constants under apps/core-service/src/reports/seed/, but
+// mutable from the admin UI so analysts can add categories /
+// keywords without a code change.
+//
+// Naming is deliberately client-neutral:
+//   - ReportCategory   → keyword-matched categories with a preset
+//                        (e.g. ECONOMY) — used by the Negative-
+//                        Coverage Index block as section headers.
+//   - ReportTopicGroup → keyword-matched content grouping used by
+//                        the Outlet-Grouped Headlines block (the
+//                        WING_COMPILATION preset).
+//   - ReportSourceGroup → display-only source-origin labels used by
+//                        the Propaganda Source Tracker block.
+//
+// Scope is global today (single-tenant deployment); a userId column
+// can be added later as a non-breaking change to enable per-user
+// customization.
+// ============================================
+
+/// Top-level taxonomy preset that groups Categories together (e.g.
+/// ECONOMY, POLITICS). Promoted from a Prisma enum to a table in
+/// migration `20260518130000_promote_report_category_preset_to_table`
+/// so analysts can add presets (DEFENSE, FOREIGN_AFFAIRS, …) without
+/// a code change. Keys are stable identifiers used by block specs
+/// (the `negativeCoverage` block stores `preset: "ECONOMY"` etc.);
+/// renaming a key would break those blocks until they migrate.
+model ReportCategoryPreset {
+  id          String           @id @default(cuid())
+  key         String           @unique
+  labelBn     String
+  labelEn     String
+  /// Free-form context for analysts maintaining the preset — what it
+  /// covers, when to use it. Surfaced in the admin UI.
+  description String?
+  order       Int              @default(0)
+  isSystem    Boolean          @default(false)
+  isDisabled  Boolean          @default(false)
+  /// Soft-delete timestamp. NULL = active, non-NULL = archived. Reads
+  /// from resolvers and block dialogs filter `deletedAt: null`; the
+  /// row stays in place so historical reports that reference its key
+  /// keep resolving. Admin UI can restore by clearing this field.
+  deletedAt   DateTime?
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  categories  ReportCategory[]
+
+  @@index([order])
+  @@index([deletedAt])
+  @@map("report_category_presets")
+}
+
+/// Keyword-matched category used by the Negative-Coverage Index
+/// block to section articles. One row per (presetId, key) —
+/// e.g. (<ECONOMY preset id>, "banking_finance"). `keywords` is a
+/// multilingual substring list matched against NewsArticle.title /
+/// category / content. `isSystem=true` flags rows originally seeded
+/// from code; UI shows a "reset to defaults" affordance that
+/// re-upserts these.
+model ReportCategory {
+  id          String   @id @default(cuid())
+  presetId    String
+  key         String
+  labelBn     String
+  labelEn     String
+  /// Optional "what this category is for" note — helps avoid drift
+  /// between system rows and analyst-added customs when tuning
+  /// keywords over time.
+  description String?
+  keywords    String[] @default([])
+  order       Int      @default(0)
+  isSystem    Boolean  @default(false)
+  isDisabled  Boolean  @default(false)
+  /// Soft-delete timestamp — see ReportCategoryPreset.deletedAt.
+  /// Cascade-on-delete from the parent preset: soft-deleting a preset
+  /// stamps `deletedAt` on every child category in the same
+  /// transaction. Restore is per-row (not cascaded) so analysts can
+  /// resurrect a preset without un-archiving categories they had
+  /// already filtered out manually.
+  deletedAt   DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  preset      ReportCategoryPreset @relation(fields: [presetId], references: [id], onDelete: Restrict)
+
+  @@unique([presetId, key])
+  @@index([presetId, order])
+  @@index([deletedAt])
+  @@map("report_categories")
+}
+
+/// Keyword-matched content grouping used by the Outlet-Grouped
+/// Headlines block's WING_COMPILATION preset. Matches against
+/// NewsArticle fields the same way as ReportCategory keywords.
+model ReportTopicGroup {
+  id          String   @id @default(cuid())
+  key         String   @unique
+  labelBn     String
+  labelEn     String
+  description String?
+  keywords    String[] @default([])
+  order       Int      @default(0)
+  isSystem    Boolean  @default(false)
+  isDisabled  Boolean  @default(false)
+  /// Soft-delete timestamp — see ReportCategoryPreset.deletedAt.
+  deletedAt   DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([order])
+  @@index([deletedAt])
+  @@map("report_topic_groups")
+}
+
+/// Topic taxonomy used to classify notifications into the desk's fixed
+/// Bengali reporting categories (দৈনন্দিন রিপোর্টের বিষয়বস্তু). Admin-editable
+/// and DB-seeded; `keywords` drive the keyword-first classification pass,
+/// with an AI fallback on no-hit/tie. Mirrors ReportTopicGroup.
+model NotificationCategory {
+  id          String   @id @default(cuid())
+  key         String   @unique
+  labelBn     String
+  labelEn     String
+  description String?
+  keywords    String[] @default([])
+  order       Int      @default(0)
+  isSystem    Boolean  @default(false)
+  isDisabled  Boolean  @default(false)
+  /// Soft-delete timestamp — see ReportCategoryPreset.deletedAt.
+  deletedAt   DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([order])
+  @@index([deletedAt])
+  @@map("notification_categories")
+}
+
+/// Display-only source-origin group used by the Propaganda Source
+/// Tracker block. Note: matching logic (the Prisma WHERE for each
+/// group) is hardcoded in the resolver for the seeded keys
+/// (INDIAN_FB_YT / BD_FB / BLOGGERS / TWITTER / TELEGRAM). User-added
+/// rows render in the UI but won't match posts until matching rules
+/// are introduced — the admin form flags this for non-seeded keys.
+model ReportSourceGroup {
+  id          String   @id @default(cuid())
+  key         String   @unique
+  labelBn     String
+  labelEn     String
+  description String?
+  order       Int      @default(0)
+  isSystem    Boolean  @default(false)
+  isDisabled  Boolean  @default(false)
+  /// Soft-delete timestamp — see ReportCategoryPreset.deletedAt.
+  deletedAt   DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([order])
+  @@index([deletedAt])
+  @@map("report_source_groups")
+}
+
+// ============================================
+// WILD SEARCH BOOKMARKS
+// ============================================
+
+/// A saved / favourited result from the Profile Wild Search panel.
+/// One row per bookmarked mention, scoped to the campaign (profile).
+model WildSearchBookmark {
+  id              String    @id @default(cuid())
+  campaignId      String    @map("campaign_id")
+  campaign        Campaign  @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  /// The headline / title of the saved result.
+  title           String    @db.Text
+
+  /// Optional full text snippet or body.
+  content         String?   @db.Text
+
+  /// Direct URL to the source article / post.
+  url             String?   @db.Text @map("url")
+
+  /// Thumbnail / preview image URL (if any).
+  imageUrl        String?   @db.Text @map("image_url")
+
+  /// Human-readable source name (e.g. "The Daily Star").
+  sourceName      String?   @map("source_name")
+
+  /// Published-at text as returned by the scraper (may be relative like "2h ago").
+  publishedAtText String?   @map("published_at_text")
+
+  /// ISO timestamp when the item was scraped.
+  scrapedAt       DateTime? @map("scraped_at")
+
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  @@index([campaignId], map: "wsb_campaign_id_idx")
+  @@index([createdAt], map: "wsb_created_at_idx")
+  @@index([url], map: "wsb_url_idx")
+  @@unique([campaignId, url, title], map: "wsb_campaign_url_title_key")
+  @@map("wild_search_bookmarks")
+}
+
+// ============================================
+// REPORT BOOKMARKS (Report Cart)
+// ============================================
+
+/// A bookmarked news article or social post collected for report generation.
+/// One row per bookmarked item, scoped to the user who bookmarked it.
+model ReportBookmark {
+  id              String   @id @default(cuid())
+  userId          String   @map("user_id")
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// The original item ID (SocialPost.id or NewsArticle.id).
+  itemId          String   @map("item_id")
+
+  /// 'news' or 'social'.
+  itemType        String   @map("item_type")
+
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  @@unique([userId, itemId], map: "rb_user_item_key")
+  @@index([userId], map: "rb_user_id_idx")
+  @@index([createdAt], map: "rb_created_at_idx")
+  @@map("report_bookmarks")
+}
+
+/// Live stream recording channel — stores a YouTube live URL and its topics.
+/// Each topic has its own schedule (start/end/chunk) and produces a separate
+/// video in the `videos` table after recording completes.
+model LiveRecordChannel {
+  id        String   @id @default(cuid())
+  name      String
+  url       String
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  topics LiveRecordTopic[]
+
+  @@map("live_record_channels")
+}
+
+/// One topic within a live recording channel. Each topic is recorded as a
+/// separate segment and saved as its own row in the `videos` table.
+model LiveRecordTopic {
+  id            String   @id @default(cuid())
+  channelId     String   @map("channel_id")
+  channel       LiveRecordChannel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  topicName     String   @map("topic_name")
+  startTime     String   @map("start_time")
+  endTime       String   @map("end_time")
+  chunkSeconds  Int      @default(30) @map("chunk_seconds")
+  /// Schedule type: ONE_TIME | RECURRING_DAILY
+  scheduleType  String   @default("ONE_TIME") @map("schedule_type")
+  /// Date string (YYYY-MM-DD) of the last recording start for recurring topics
+  lastRunDate   String?  @map("last_run_date")
+  /// Recording status: PENDING | RECORDING | COMPLETED | FAILED
+  status        String   @default("PENDING")
+  /// Worker-video job ID for polling progress
+  jobId         String?  @map("job_id")
+  /// Progress percent 0-100
+  percent       Int      @default(0)
+  /// Status message from the worker
+  message       String?
+  /// The video row created when recording completes
+  videoId       String?  @map("video_id")
+  video         Video?   @relation(fields: [videoId], references: [id], onDelete: SetNull)
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  @@index([channelId], map: "lrt_channel_id_idx")
+  @@index([status], map: "lrt_status_idx")
+  @@map("live_record_topics")
+}

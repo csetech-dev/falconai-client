@@ -1,0 +1,167 @@
+# Pull pre-built FalconAI images from GHCR (no source build on client).
+#
+# Requires in .env.app (or shell):
+#   GHCR_IMAGE_PREFIX=ghcr.io/<your-org>/falconai
+#   FALCON_IMAGE_TAG=latest          # or a commit SHA for pinning
+#
+# Usage (application stack):
+#   docker login ghcr.io -u <user> --password-stdin
+#   docker compose --env-file .env.app \
+#     -f docker-compose.app.yml -f docker-compose.ghcr.yml pull
+#   docker compose --env-file .env.app \
+#     -f docker-compose.app.yml -f docker-compose.ghcr.yml up -d --no-build
+#
+# Usage (monolithic stack — deploy-agent on client):
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml \
+#     -f docker-compose.ghcr.yml pull
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml \
+#     -f docker-compose.ghcr.yml up -d --no-build
+
+x-ghcr-image: &ghcr-image
+  pull_policy: always
+
+x-worker-news-image: &worker-news-image
+  <<: *ghcr-image
+  image: ${GHCR_IMAGE_PREFIX:?Set GHCR_IMAGE_PREFIX in .env}/worker-news:${FALCON_IMAGE_TAG:-latest}
+
+# GHCR images ship .pyc only — must not use `python api.py` / `python app.py`.
+x-worker-fb-command: &worker-fb-command
+  command:
+    - sh
+    - -lc
+    - 'mkdir -p /app/facebook_vnc_profile; Xvfb :99 -screen 0 1920x1080x24 -ac >/tmp/xvfb.log 2>&1 & while [ ! -S /tmp/.X11-unix/X99 ]; do sleep 0.2; done; export DISPLAY=:99; if command -v xset >/dev/null 2>&1; then xset s off -dpms s noblank; fi; openbox >/tmp/openbox.log 2>&1 & x11vnc -display :99 -forever -shared -nopw -noxdamage -xkb -repeat -listen 0.0.0.0 -rfbport 5900 >/tmp/x11vnc.log 2>&1 & websockify --web=/usr/share/novnc/ 7900 localhost:5900 >/tmp/websockify.log 2>&1 & if command -v xset >/dev/null 2>&1; then (while true; do DISPLAY=:99 xset s off -dpms s noblank >/dev/null 2>&1; sleep 30; done) & fi; run-py api'
+
+x-worker-x-command: &worker-x-command
+  command:
+    - sh
+    - -lc
+    - 'mkdir -p /app/x_chrome_profile /app/lanes && chown -R root:root /app/x_chrome_profile; Xvfb :99 -screen 0 1920x1080x24 -ac >/tmp/xvfb.log 2>&1 & while [ ! -S /tmp/.X11-unix/X99 ]; do sleep 0.2; done; export DISPLAY=:99; openbox --config-file /app/openbox-rc.xml >/tmp/openbox.log 2>&1 & x11vnc -display :99 -forever -shared -nopw -listen 0.0.0.0 -rfbport 5900 >/tmp/x11vnc.log 2>&1 & websockify --web=/usr/share/novnc/ 7900 localhost:5900 >/tmp/websockify.log 2>&1 & run-py app'
+
+x-worker-linkedin-command: &worker-linkedin-command
+  command:
+    - sh
+    - -lc
+    - 'mkdir -p /app/linkedin_chrome_profile /app/lanes; Xvfb :99 -screen 0 1920x1080x24 -ac >/tmp/xvfb.log 2>&1 & while [ ! -S /tmp/.X11-unix/X99 ]; do sleep 0.2; done; export DISPLAY=:99; if command -v xset >/dev/null 2>&1; then xset s off -dpms s noblank; fi; openbox >/tmp/openbox.log 2>&1 & x11vnc -display :99 -forever -shared -nopw -noxdamage -xkb -repeat -listen 0.0.0.0 -rfbport 5900 >/tmp/x11vnc.log 2>&1 & websockify --web=/usr/share/novnc/ 7900 localhost:5900 >/tmp/websockify.log 2>&1 & if command -v xset >/dev/null 2>&1; then (while true; do DISPLAY=:99 xset s off -dpms s noblank >/dev/null 2>&1; sleep 30; done) & fi; run-py api'
+
+x-web-worker-command: &web-worker-command
+  command:
+    - sh
+    - -lc
+    - 'mkdir -p /app/.chrome-profile /app/lanes && chown -R root:root /app/.chrome-profile; Xvfb :99 -screen 0 1920x1080x24 -ac >/tmp/xvfb.log 2>&1 & while [ ! -S /tmp/.X11-unix/X99 ]; do sleep 0.2; done; export DISPLAY=:99; openbox --config-file /app/openbox-rc.xml >/tmp/openbox.log 2>&1 & x11vnc -display :99 -forever -shared -nopw -listen 0.0.0.0 -rfbport 5900 >/tmp/x11vnc.log 2>&1 & websockify --web=/usr/share/novnc/ 7900 localhost:5900 >/tmp/websockify.log 2>&1 & run-py api'
+
+services:
+  proxy-rotator:
+    <<: *ghcr-image
+    image: ${GHCR_IMAGE_PREFIX}/proxy-rotator:${FALCON_IMAGE_TAG:-latest}
+
+  falcon-core:
+    <<: *ghcr-image
+    image: ${GHCR_IMAGE_PREFIX}/core-service:${FALCON_IMAGE_TAG:-latest}
+    environment:
+      DEPLOY_PROJECT_DIR: ${FALCON_DEPLOY_DIR:-/opt/falconai-client}
+    volumes: !override
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${FALCON_DEPLOY_DIR:-.}:/opt/FalconAI
+
+  falcon-auth:
+    <<: *ghcr-image
+    image: ${GHCR_IMAGE_PREFIX}/falcon-auth:${FALCON_IMAGE_TAG:-latest}
+
+  falcon-ai-py:
+    <<: *ghcr-image
+    image: ${GHCR_IMAGE_PREFIX}/ai-service:${FALCON_IMAGE_TAG:-latest}
+
+  falcon-analytics:
+    <<: *ghcr-image
+    image: ${GHCR_IMAGE_PREFIX}/falcon-analytics:${FALCON_IMAGE_TAG:-latest}
+
+  search-service:
+    <<: *ghcr-image
+    image: ${GHCR_IMAGE_PREFIX}/search-service:${FALCON_IMAGE_TAG:-latest}
+
+  api-gateway:
+    <<: *ghcr-image
+    image: ${GHCR_IMAGE_PREFIX}/api-gateway:${FALCON_IMAGE_TAG:-latest}
+
+  worker-bot-detection:
+    <<: *ghcr-image
+    image: ${GHCR_IMAGE_PREFIX}/worker-bot-detection:${FALCON_IMAGE_TAG:-latest}
+
+  worker-fb:
+    <<: [*ghcr-image, *worker-fb-command]
+    image: ${GHCR_IMAGE_PREFIX}/worker-fb:${FALCON_IMAGE_TAG:-latest}
+    environment:
+      FB_MULTI_ACCOUNT_ENABLED: "true"
+      CORE_SERVICE_URL: http://falcon-core:4000
+
+  worker-linkedin:
+    <<: [*ghcr-image, *worker-linkedin-command]
+    image: ${GHCR_IMAGE_PREFIX}/worker-linkedin:${FALCON_IMAGE_TAG:-latest}
+    environment:
+      LINKEDIN_MULTI_ACCOUNT_ENABLED: "true"
+      CORE_SERVICE_URL: http://falcon-core:4000
+      LINKEDIN_LANE_PLATFORM: LINKEDIN
+
+  worker-x:
+    <<: [*ghcr-image, *worker-x-command]
+    image: ${GHCR_IMAGE_PREFIX}/worker-x:${FALCON_IMAGE_TAG:-latest}
+    environment:
+      X_MULTI_ACCOUNT_ENABLED: "true"
+      CORE_SERVICE_URL: http://falcon-core:4000
+      X_LANE_PLATFORM: TWITTER
+
+  web-worker:
+    <<: [*ghcr-image, *web-worker-command]
+    image: ${GHCR_IMAGE_PREFIX}/web-worker:${FALCON_IMAGE_TAG:-latest}
+    environment:
+      WEB_WORKER_MULTI_ACCOUNT_ENABLED: "true"
+      CORE_SERVICE_URL: http://falcon-core:4000
+      WEB_WORKER_LANE_PLATFORM: WEB_WORKER
+
+  worker-news:
+    <<: *worker-news-image
+
+  worker-news-media-1:
+    <<: *worker-news-image
+
+  worker-news-scheduler:
+    <<: *worker-news-image
+
+  worker-news-todays-scheduler:
+    <<: *worker-news-image
+
+  worker-news-trending-scheduler:
+    <<: *worker-news-image
+
+  worker-news-top-scheduler:
+    <<: *worker-news-image
+
+  worker-news-map:
+    <<: *worker-news-image
+
+  worker-news-tv:
+    <<: *worker-news-image
+
+  worker-telegram:
+    <<: *ghcr-image
+    image: ${GHCR_IMAGE_PREFIX}/worker-telegram:${FALCON_IMAGE_TAG:-latest}
+
+  worker-video:
+    <<: *ghcr-image
+    image: ${GHCR_IMAGE_PREFIX}/worker-video:${FALCON_IMAGE_TAG:-latest}
+
+  worker-image:
+    <<: *ghcr-image
+    image: ${GHCR_IMAGE_PREFIX}/worker-image:${FALCON_IMAGE_TAG:-latest}
+
+  internal-ai:
+    <<: *ghcr-image
+    image: ${GHCR_IMAGE_PREFIX}/internal-ai:${FALCON_IMAGE_TAG:-latest}
+
+  falcon-frontend:
+    <<: *ghcr-image
+    image: ${GHCR_IMAGE_PREFIX}/web:${FALCON_IMAGE_TAG:-latest}
+
+  scraper-viewer-proxy:
+    volumes: !override
+      - ./infra/nginx/scraper-viewer-proxy.conf:/etc/nginx/nginx.conf:ro
