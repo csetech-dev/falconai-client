@@ -617,6 +617,7 @@ services:
       MINIO_PUBLIC_USE_SSL: 'false'
       # Multi-account routing — per-lane VNC login + scrape
       FB_MULTI_ACCOUNT_ENABLED: "true"
+      FB_REMOTE_EXTENSION_SCRAPING_ENABLED: "${FB_REMOTE_EXTENSION_SCRAPING_ENABLED:-true}"
       CORE_SERVICE_URL: http://falcon-core:4000
       WORKER_API_PASSWORD: ${WORKER_API_PASSWORD:-85234569495721}
       FB_LANE_PLATFORM: FACEBOOK
@@ -1196,16 +1197,12 @@ services:
       TELEGRAM_API_HASH: ${TELEGRAM_API_HASH:-}
       TELEGRAM_PHONE: ${TELEGRAM_PHONE:-}
       TELEGRAM_PASSWORD: ${TELEGRAM_PASSWORD:-}
-      PROXY_ROTATOR_URL: http://proxy-rotator:8888
-      PROXY_ENABLED: 'true'
       CORE_SERVICE_URL: http://falcon-core:4000
       WORKER_API_PASSWORD: ${WORKER_API_PASSWORD:-85234569495721}
     shm_size: 2gb
     volumes:
     - telegram_sessions:/app/sessions
     depends_on:
-      proxy-rotator:
-        condition: service_started
       redis:
         condition: service_started
     healthcheck:

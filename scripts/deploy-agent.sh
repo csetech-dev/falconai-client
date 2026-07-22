@@ -155,6 +155,12 @@ run_deployment() {
 
   load_trigger_payload
 
+  # The technical-panel "Trigger Deployment" button (and the GHCR webhook) always
+  # runs the GHCR deploy — equivalent to `make deploy-ghcr` — regardless of the
+  # host's FALCON_DEPLOY_MODE. This keeps triggered deploys pulling pre-built
+  # images instead of doing a local git build.
+  DEPLOY_MODE="ghcr"
+
   if [[ "$DEPLOY_MODE" == "ghcr" ]]; then
     # ---- GHCR client bundle: pull images + up (no git) ----
     [[ -n "${GHCR_IMAGE_PREFIX:-}" ]] || {

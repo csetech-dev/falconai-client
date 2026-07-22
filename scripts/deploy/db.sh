@@ -55,6 +55,7 @@ Running falcon-core container (classic docker exec approach):
   exec push-loss    docker exec … prisma db push --skip-generate --accept-data-loss
   exec generate     docker exec … prisma generate
   exec seed         docker exec … full seed flow
+  exec seed-prompts docker exec … npm run seed:prompts
   exec migrate      docker exec … prisma migrate deploy
   exec status       docker exec … prisma migrate status
   exec <cmd>        docker exec … sh -lc "<cmd>"  (advanced)
@@ -63,6 +64,7 @@ Examples:
   make db-push
   make db-push-loss
   make db-exec-push
+  make db-exec-seed-prompts
   ./scripts/deploy/db.sh exec push-loss
   ./scripts/deploy/db.sh psql -- -c "SELECT count(*) FROM users;"
 EOF

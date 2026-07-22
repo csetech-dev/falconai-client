@@ -58,10 +58,15 @@ services:
     <<: *ghcr-image
     image: ${GHCR_IMAGE_PREFIX}/core-service:${FALCON_IMAGE_TAG:-latest}
     environment:
-      DEPLOY_PROJECT_DIR: ${FALCON_DEPLOY_DIR:-/opt/falconai-client}
+      # Container-internal deploy dir. The technical-panel service writes
+      # .deploy/trigger under this path, so it MUST equal the container-side mount
+      # target below — that way the file lands on the host (via the bind mount)
+      # where the deploy-agent watches it. Kept as /opt/falconai-client so the
+      # container path matches the host client-bundle dir (no /opt/FalconAI).
+      DEPLOY_PROJECT_DIR: /opt/falconai-client
     volumes: !override
       - /var/run/docker.sock:/var/run/docker.sock
-      - ${FALCON_DEPLOY_DIR:-.}:/opt/FalconAI
+      - ${FALCON_DEPLOY_DIR:-.}:/opt/falconai-client
 
   falcon-auth:
     <<: *ghcr-image

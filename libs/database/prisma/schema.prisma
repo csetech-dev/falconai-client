@@ -63,6 +63,27 @@ enum SocialAccountStatus {
   ERROR
 }
 
+enum SocialLaneExecutionMode {
+  LOCAL
+  REMOTE_EXTENSION
+}
+
+enum RemoteExtensionHostStatus {
+  PENDING
+  ONLINE
+  OFFLINE
+  REVOKED
+}
+
+enum RemoteLaneCommandStatus {
+  PENDING
+  DISPATCHED
+  COMPLETED
+  FAILED
+  EXPIRED
+  CANCELLED
+}
+
 enum ScrapePlatform {
   TWITTER
   FACEBOOK
@@ -354,6 +375,9 @@ model UserNotification {
   createdAt          DateTime               @default(now())
   updatedAt          DateTime               @updatedAt
 
+  topicCategoryKey   String?
+  topicCategoryLabel String?
+
   @@index([userId, status, createdAt])
   @@index([userId, createdAt])
   @@index([notificationTypeId, status])
@@ -361,6 +385,7 @@ model UserNotification {
   @@index([eventKey])
   @@index([dedupeKey])
   @@index([entityType, entityId])
+  @@index([userId, topicCategoryKey, createdAt])
   @@unique([userId, dedupeKey])
   @@map("user_notifications")
 }
@@ -539,6 +564,7 @@ model Campaign {
   postComments     PostComment[]
   wildSearchBookmarks WildSearchBookmark[]
   videos              Video[]
+  videoSnapshots      VideoSnapshot[]
   profileGroupItems   ProfileGroupItem[]
   identityMember      ProfileIdentityMember?
   
@@ -581,7 +607,14 @@ model ScrapeJob {
   // Post-level scrapes: comments, shares (optional)
   postId     String?
   post       SocialPost?     @relation(fields: [postId], references: [id], onDelete: Cascade)
-  
+
+  // Video-level scrapes (video snapshot pipeline). A YouTube video has no
+  // social_post, so its snapshot follow-up / recurring jobs reference the
+  // videos row directly. Nullable + independent of postId: a FB video snapshot
+  // job still uses postId (it lives in social_post), a YouTube one uses videoId.
+  videoId    String?         @map("video_id")
+  video      Video?          @relation(fields: [videoId], references: [id], onDelete: Cascade)
+
   status     ScrapeJobStatus @default(PENDING)
   platform   ScrapePlatform
   priority   JobPriority     @default(MEDIUM)
@@ -625,6 +658,7 @@ model ScrapeJob {
 
   @@index([campaignId])
   @@index([postId])
+  @@index([videoId])
   @@index([status])
   @@index([priority])
   @@index([nextRunAt])
@@ -665,6 +699,11 @@ model SocialAccount {
   enabled    Boolean             @default(true)
   priority   Int                 @default(100)       // load-balancer weight (higher = preferred)
   maxConcurrent Int              @default(1)         // jobs at once on this lane (lane stays serialized)
+  // LOCAL lanes run Chrome inside worker-fb. REMOTE_EXTENSION lanes borrow a
+  // paired Chrome extension's browser environment while worker-fb retains all
+  // scraping/parsing responsibilities.
+  executionMode SocialLaneExecutionMode @default(LOCAL)
+  remoteExtensionHostId String?         @unique
 
   // Proxy binding — ONE pinned IP per lane (picked from system_conf proxy.list).
   proxyUrl   String?             @db.Text
@@ -708,12 +747,64 @@ model SocialAccount {
   events     SocialAccountEvent[]
   jobs       ScrapeJob[]
   proxy      SocialProxy?         @relation("AccountProxy")
+  remoteExtensionHost RemoteExtensionHost? @relation("RemoteExtensionHostLane", fields: [remoteExtensionHostId], references: [id], onDelete: SetNull)
 
   @@unique([platform, laneIndex])
   @@index([platform])
   @@index([status])
   @@index([enabled])
   @@map("social_accounts")
+}
+
+// A browser extension installation registered as a remote worker-fb lane host.
+// It never persists scraped data itself: Core brokers browser commands between
+// worker-fb and this host, and worker-fb returns the normalized scrape result.
+model RemoteExtensionHost {
+  id              String                    @id @default(cuid())
+  installationId  String                    @unique
+  label           String
+  status          RemoteExtensionHostStatus @default(PENDING)
+  pairingTokenHash String?                  @db.Text
+  pairingExpiresAt DateTime?
+  deviceTokenHash String?                   @db.Text
+  lastHeartbeatAt DateTime?
+  browserConnected Boolean                  @default(false)
+  facebookLoggedIn Boolean                  @default(false)
+  capabilities    Json?
+  extensionVersion String?
+  lastError       String?                   @db.Text
+  revokedAt       DateTime?
+  createdAt       DateTime                  @default(now())
+  updatedAt       DateTime                  @updatedAt
+
+  lane SocialAccount? @relation("RemoteExtensionHostLane")
+  commands RemoteLaneCommand[]
+
+  @@index([status])
+  @@index([lastHeartbeatAt])
+  @@map("remote_extension_hosts")
+}
+
+model RemoteLaneCommand {
+  id          String                  @id
+  hostId      String
+  host        RemoteExtensionHost     @relation(fields: [hostId], references: [id], onDelete: Cascade)
+  laneId      String
+  leaseId     String
+  action      String
+  payload     Json
+  result      Json?
+  error       String?                 @db.Text
+  status      RemoteLaneCommandStatus @default(PENDING)
+  issuedAt    DateTime                @default(now())
+  dispatchedAt DateTime?
+  completedAt DateTime?
+  expiresAt   DateTime
+
+  @@index([hostId, status, issuedAt])
+  @@index([laneId, status])
+  @@index([leaseId])
+  @@map("remote_lane_commands")
 }
 
 // Dedicated, platform-scoped proxy inventory for social-media scraping.
@@ -1190,6 +1281,11 @@ model NewsArticle {
   aiAnalysisStatus String?      @default("PENDING")
   analysisStatus   String?      @default("PENDING")
 
+  isAlarmingIncident Boolean   @default(false)
+  isAcknowledged     Boolean   @default(false)
+  alarmedAt          DateTime?
+  acknowledgedAt     DateTime?
+
   // AI Hybrid Search (added by migration 002_ai_search)
   searchTsv        Unsupported("tsvector")?  @map("search_tsv")    // Full-text search vector
   titleEmbedding   Unsupported("vector(1024)")?  @map("title_embedding") // BGE-M3 semantic embedding
@@ -1218,6 +1314,7 @@ model NewsArticle {
   @@index([districtId])
   @@index([divisionId, sourceId, scrapedAt])
   @@index([districtId, sourceId, scrapedAt])
+  @@index([isAlarmingIncident, isAcknowledged, divisionId])
   @@map("news_articles")
 }
 
@@ -1447,7 +1544,12 @@ model SocialPost {
   saves           Int             @default(0)
   impressions     Int             @default(0)
   reach           Int             @default(0)
-  
+  // Video view count (nullable): only set for video posts (postType VIDEO /
+  // MIXED_VIDEO). The FB timeline scrape provides this for free. Used as the
+  // baseline seed when creating the video snapshot (video_snapshots), and to
+  // display current views in the UI. Null for non-video posts.
+  videoViewCount  BigInt?         @map("video_view_count")
+
   // Analysis
   sentiment        Float?          // -1 to 1
   viralPotential   Float?          // 0 to 1
@@ -1495,6 +1597,7 @@ model SocialPost {
   factChecks      SocialPostFactCheck[]
 
   groupPostCache GroupPostCache[]
+  videoSnapshots VideoSnapshot[]
 
   @@unique([campaignId, platformPostId])
   @@index([campaignId])
@@ -2464,11 +2567,26 @@ model Video {
   createdAt       DateTime            @default(now()) @map("created_at")
   updatedAt       DateTime            @updatedAt @map("updated_at")
 
+  // ── Video viral-monitoring lifecycle (YouTube videos live here, not in
+  // social_post). Mirrors the SocialPost viral fields so the video snapshot
+  // pipeline can drive baseline → follow-up → recurring auto-schedule → stop /
+  // bad-retain. FB videos use social_post's own fields instead. All nullable /
+  // defaulted so existing rows are unaffected. ──
+  viralMonitoringStatus    String?   @map("viral_monitoring_status") // VIDEO_MONITORING | VIDEO_FOLLOWUP_SCHEDULED | VIDEO_AUTO_SCHEDULED | VIDEO_FULL_MONITORING | VIDEO_NOT_VIRAL | VIDEO_BAD_RETAINED
+  isViralCandidate         Boolean   @default(false) @map("is_viral_candidate")
+  isAutoScheduled          Boolean   @default(false) @map("is_auto_scheduled")
+  scheduledIntervalMinutes Int?      @map("scheduled_interval_minutes")
+  lastSnapshotAt           DateTime? @map("last_snapshot_at")
+  nextSnapshotAt           DateTime? @map("next_snapshot_at")
+  badVideoExpiresAt        DateTime? @map("bad_video_expires_at")
+
   aiJobs         VideoAiJob[]
   speakers       VideoSpeaker[]
   segments       VideoSegment[]
   topics         VideoTopic[]
   liveRecordTopics LiveRecordTopic[]
+  snapshots      VideoSnapshot[]
+  scrapeJobs     ScrapeJob[]
 
   @@unique([campaignId, externalVideoId], map: "yt_campaign_video_unique")
   @@index([campaignId], map: "yt_campaign_id_idx")
@@ -2480,6 +2598,84 @@ model Video {
   @@index([analysisStatus], map: "video_analysis_status_idx")
   @@index([ingestionMethod], map: "video_ingestion_method_idx")
   @@map("videos")
+}
+
+// ============================================
+// VIDEO SNAPSHOTS (engagement time-series)
+// ============================================
+// Time-series engagement history for a video, mirroring social_post_snapshots
+// but widened to cover BOTH Facebook and YouTube video metrics.
+//
+// All three owning references are NULLABLE by design so a snapshot can attach
+// to whatever context it was captured in:
+//   - campaignId   : campaign-scraped video
+//   - socialPostId : a Facebook video that lives in social_post
+//   - videoId      : a row in the videos table (YouTube, or a FB video added
+//                    straight into Video Intel)
+// A standalone "single video" (e.g. a YouTube link with no campaign) can be
+// stored with only videoId set (or even none, keyed purely by platform+
+// externalVideoId), which keeps the pipeline flexible.
+model VideoSnapshot {
+  id             String         @id @default(cuid())
+
+  // Flexible ownership — any combination may be null.
+  campaignId     String?        @map("campaign_id")
+  campaign       Campaign?      @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  socialPostId   String?        @map("social_post_id")
+  socialPost     SocialPost?    @relation(fields: [socialPostId], references: [id], onDelete: Cascade)
+  videoId        String?        @map("video_id")
+  video          Video?         @relation(fields: [videoId], references: [id], onDelete: Cascade)
+
+  // Video identity (lets a snapshot exist without any FK — a lone single video)
+  platform        ScrapePlatform @default(YOUTUBE)
+  externalVideoId String?        @map("external_video_id")
+  sourceUrl       String?        @map("source_url")
+
+  rank           Int            // 1, 2, 3 ...
+  stage          String         @default("BASELINE") // BASELINE | FOLLOWUP_1 | FOLLOWUP_2 | ...
+
+  // ── Absolute counts at snapshot time (superset of both platforms) ──
+  viewCount         BigInt   @default(0) @map("view_count")     // YT viewCount / FB videoViewCount (unique viewers)
+  playCount         BigInt?  @map("play_count")                 // FB total plays; null for YT
+  likeCount         BigInt   @default(0) @map("like_count")     // YT likes / FB total reactions
+  likeCountRyd      BigInt?  @map("like_count_ryd")             // YT returnyoutubedislike like estimate
+  dislikeCount      BigInt?  @map("dislike_count")              // YT only
+  commentCount      BigInt   @default(0) @map("comment_count")
+  shareCount        BigInt?  @map("share_count")                // FB (rounded); null for YT
+  reactionSummary   Json?    @map("reaction_summary")           // FB reaction-type breakdown; null for YT
+  likeCountIsApproximate  Boolean @default(false) @map("like_count_is_approximate")
+  shareCountIsApproximate Boolean @default(false) @map("share_count_is_approximate")
+
+  engagementRate    Float    @default(0) @map("engagement_rate")
+
+  // ── Comparison fields (null on rank=1) ──
+  previousSnapshotId String? @map("previous_snapshot_id")
+  viewDelta          BigInt? @map("view_delta")
+  likeDelta          BigInt? @map("like_delta")
+  commentDelta       BigInt? @map("comment_delta")
+  shareDelta         BigInt? @map("share_delta")
+  timeDiffMinutes    Float?  @map("time_diff_minutes")
+  viewPerMinute      Float?  @map("view_per_minute")
+  likePerMinute      Float?  @map("like_per_minute")     // maps to reactionPerMinute in the post pipeline
+  commentPerMinute   Float?  @map("comment_per_minute")
+  sharePerMinute     Float?  @map("share_per_minute")    // highest-weighted term (x4) in velocity score; FB only
+
+  // ── Decision output ──
+  viralScore         Float?   @map("viral_score")
+  isViralCandidate   Boolean  @default(false) @map("is_viral_candidate")
+
+  // ── Timing ──
+  scrapedAt          DateTime @map("scraped_at")
+  createdAt          DateTime @default(now()) @map("created_at")
+  updatedAt          DateTime @updatedAt @map("updated_at")
+
+  @@index([campaignId])
+  @@index([socialPostId])
+  @@index([videoId])
+  @@index([platform, externalVideoId])
+  @@index([scrapedAt])
+  @@index([isViralCandidate])
+  @@map("video_snapshots")
 }
 
 model VideoTopic {
@@ -2943,6 +3139,30 @@ model ReportTopicGroup {
   @@index([order])
   @@index([deletedAt])
   @@map("report_topic_groups")
+}
+
+/// Topic taxonomy used to classify notifications into the desk's fixed
+/// Bengali reporting categories (দৈনন্দিন রিপোর্টের বিষয়বস্তু). Admin-editable
+/// and DB-seeded; `keywords` drive the keyword-first classification pass,
+/// with an AI fallback on no-hit/tie. Mirrors ReportTopicGroup.
+model NotificationCategory {
+  id          String   @id @default(cuid())
+  key         String   @unique
+  labelBn     String
+  labelEn     String
+  description String?
+  keywords    String[] @default([])
+  order       Int      @default(0)
+  isSystem    Boolean  @default(false)
+  isDisabled  Boolean  @default(false)
+  /// Soft-delete timestamp — see ReportCategoryPreset.deletedAt.
+  deletedAt   DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([order])
+  @@index([deletedAt])
+  @@map("notification_categories")
 }
 
 /// Display-only source-origin group used by the Propaganda Source
