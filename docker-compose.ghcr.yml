@@ -84,6 +84,10 @@ services:
     <<: *ghcr-image
     image: ${GHCR_IMAGE_PREFIX}/search-service:${FALCON_IMAGE_TAG:-latest}
 
+  falcon-gateway:
+    <<: *ghcr-image
+    image: ${GHCR_IMAGE_PREFIX}/falcon-gateway:${FALCON_IMAGE_TAG:-latest}
+
   api-gateway:
     <<: *ghcr-image
     image: ${GHCR_IMAGE_PREFIX}/api-gateway:${FALCON_IMAGE_TAG:-latest}

@@ -12,13 +12,6 @@ SCRAPER_CONTAINERS=(
   worker-fb
   worker-linkedin
   worker-news
-  worker-news-media-1
-  worker-news-scheduler
-  worker-news-todays-scheduler
-  worker-news-trending-scheduler
-  worker-news-top-scheduler
-  worker-news-map
-  worker-news-tv
   worker-x
   worker-telegram
   worker-video

@@ -38,6 +38,7 @@ One-off container (falcon-core does NOT need to be running; uses .env.app):
   generate          prisma generate
   seed              full seed flow (seed.ts + prompts + news sources + news status filter + news media groups + geo)
   seed-prompts      npm run seed:prompts
+  seed-news-prompts npm run seed:news-prompts
   seed-news-sources npm run seed:news-sources
   seed-news-status  npm run seed:news-status-filter
   seed-news-media   npm run seed:news-media-groups
@@ -168,6 +169,9 @@ run_db_action() {
     seed-prompts)
       shell_cmd="cd ${DB_DIR} && npm run seed:prompts"
       ;;
+    seed-news-prompts)
+      shell_cmd="cd ${DB_DIR} && npm run seed:news-prompts"
+      ;;
     seed-news-sources)
       shell_cmd="cd ${DB_DIR} && npm run seed:news-sources"
       ;;
@@ -231,7 +235,7 @@ main() {
     generate)
       run_db_action oneoff generate
       ;;
-    seed|seed-prompts|seed-news-sources|seed-news-status|seed-news-media|seed-geo|seed-videos)
+    seed|seed-prompts|seed-news-prompts|seed-news-sources|seed-news-status|seed-news-media|seed-geo|seed-videos)
       run_db_action oneoff "${command}"
       ;;
     seed-twitter-profiles)
@@ -260,7 +264,7 @@ main() {
           warn "exec push-loss may drop columns/tables — backup first if unsure."
           run_db_action exec push 1
           ;;
-        generate|seed|seed-prompts|seed-news-sources|seed-news-status|seed-news-media|seed-geo|seed-videos|seed-twitter-profiles|seed-telegram-profiles|migrate|status)
+        generate|seed|seed-prompts|seed-news-prompts|seed-news-sources|seed-news-status|seed-news-media|seed-geo|seed-videos|seed-twitter-profiles|seed-telegram-profiles|migrate|status)
           run_db_action exec "${sub}"
           ;;
         "")

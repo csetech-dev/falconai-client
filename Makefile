@@ -1,6 +1,6 @@
 .PHONY: init-storage init-app deploy-storage deploy-app deploy-ghcr deploy-status deploy-down fix-crlf fix-worker-entrypoints verify-scrapers clean-docker setup-auto-deploy logs-app logs-storage \
-	db-push db-push-loss db-generate db-seed db-seed-prompts db-seed-videos db-status db-psql \
-	db-exec-push db-exec-push-loss db-exec-generate db-exec-seed db-exec-seed-prompts db-exec-seed-videos db-exec-seed-twitter-profiles db-exec-seed-telegram-profiles db-copy-schema \
+	db-push db-push-loss db-generate db-seed db-seed-prompts db-seed-news-prompts db-seed-news-sources db-seed-videos db-status db-psql \
+	db-exec-push db-exec-push-loss db-exec-generate db-exec-seed db-exec-seed-prompts db-exec-seed-news-prompts db-exec-seed-news-sources db-exec-seed-videos db-exec-seed-twitter-profiles db-exec-seed-telegram-profiles db-copy-schema \
 	dump-db help
 
 help:
@@ -31,6 +31,8 @@ help:
 	@echo "    make db-generate      prisma generate"
 	@echo "    make db-seed          run full database seed flow"
 	@echo "    make db-seed-prompts  seed Technical Panel prompts (system_conf)"
+	@echo "    make db-seed-news-prompts seed News AI prompts (NEWS_AI_PROMPT_TEMPLATE & TRENDING)"
+	@echo "    make db-seed-news-sources seed News sources data (npm run seed:news-sources)"
 	@echo "    make db-seed-videos   seed demo video intelligence data"
 	@echo "    make db-status        migration status"
 	@echo "    make db-psql          list tables"
@@ -45,6 +47,8 @@ help:
 	@echo "    make db-exec-generate prisma generate via docker exec"
 	@echo "    make db-exec-seed     run full database seed flow via docker exec"
 	@echo "    make db-exec-seed-prompts  seed Technical Panel prompts via docker exec (npm run seed:prompts)"
+	@echo "    make db-exec-seed-news-prompts seed News AI prompts via docker exec (npm run seed:news-prompts)"
+	@echo "    make db-exec-seed-news-sources seed News sources data via docker exec (npm run seed:news-sources)"
 	@echo "    make db-exec-seed-videos  seed demo videos via docker exec"
 	@echo "    make db-exec-seed-twitter-profiles  seed Twitter/X profiles (worker-x must be authorized)"
 	@echo "    make db-exec-seed-telegram-profiles seed Telegram channels (technical-panel Telegram OTP session required)"
@@ -106,6 +110,12 @@ db-seed:
 db-seed-prompts:
 	bash scripts/deploy/db.sh seed-prompts
 
+db-seed-news-prompts:
+	bash scripts/deploy/db.sh seed-news-prompts
+
+db-seed-news-sources:
+	bash scripts/deploy/db.sh seed-news-sources
+
 db-seed-videos:
 	bash scripts/deploy/db.sh seed-videos
 
@@ -132,6 +142,12 @@ db-exec-seed:
 
 db-exec-seed-prompts:
 	bash scripts/deploy/db.sh exec seed-prompts
+
+db-exec-seed-news-prompts:
+	bash scripts/deploy/db.sh exec seed-news-prompts
+
+db-exec-seed-news-sources:
+	bash scripts/deploy/db.sh exec seed-news-sources
 
 db-exec-seed-videos:
 	bash scripts/deploy/db.sh exec seed-videos

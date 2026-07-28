@@ -227,15 +227,11 @@ services:
       WORKER_LINKEDIN_URL: http://worker-linkedin:3011
       WORKER_IMAGE_URL: http://worker-image:3015
       WORKER_X_URL: http://worker-x:3013
-      WORKER_NEWS_SCHEDULE_URL: http://worker-news-scheduler:3012
-      WORKER_NEWS_POOL_URLS: http://worker-news-media-1:3012
-      WORKER_NEWS_TODAYS_SCHEDULE_URL: http://worker-news-todays-scheduler:3012
-      WORKER_NEWS_TRENDING_SCHEDULE_URL: http://worker-news-trending-scheduler:3012
-      WORKER_NEWS_TOP_SCHEDULE_URL: http://worker-news-top-scheduler:3012
-      WORKER_NEWS_MAP_URL: http://worker-news-map:3012
-      WORKER_NEWS_TV_URL: http://worker-news-tv:3012
+      WORKER_NEWS_URL: http://worker-news:3012
       BOT_DETECTION_WORKER_URL: http://worker-bot-detection:3016
       WORKER_API_PASSWORD: ${WORKER_API_PASSWORD:-85234569495721}
+      GATEWAY_INTERNAL_API_KEY: ${GATEWAY_INTERNAL_API_KEY}
+      GATEWAY_INTERNAL_URL: ${GATEWAY_INTERNAL_URL:-http://falcon-gateway:4010/api/v1}
       DEPLOY_PROJECT_DIR: /opt/FalconAI
       YT_MIN_VIDEO_DURATION_MINUTES: 20
       YT_CAMPAIGN_VIDEO_FORMAT: mp4
@@ -526,6 +522,55 @@ services:
         aliases:
         - falcon-search
         - search-service
+  falcon-gateway:
+    build:
+      context: ./apps/falcon-gateway
+      dockerfile: Dockerfile
+    container_name: falcon-gateway
+    restart: unless-stopped
+    ports:
+    - 12060:4010
+    environment:
+      PORT: 4010
+      NODE_ENV: production
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@${POSTGRES_HOST}:${POSTGRES_PORT:-5432}/falcon_ai?schema=public&application_name=falcon-gateway
+      REDIS_HOST: falcon-redis
+      REDIS_PORT: 6379
+      REDIS_DB: 0
+      GATEWAY_ENCRYPTION_KEY: ${GATEWAY_ENCRYPTION_KEY}
+      GATEWAY_INTERNAL_API_KEY: ${GATEWAY_INTERNAL_API_KEY}
+      GATEWAY_HMAC_SKEW_SECONDS: ${GATEWAY_HMAC_SKEW_SECONDS:-300}
+      GATEWAY_DB_AUTO_INIT: ${GATEWAY_DB_AUTO_INIT:-true}
+    depends_on:
+      redis:
+        condition: service_started
+    healthcheck:
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
+      test:
+      - CMD
+      - node
+      - -e
+      - "require('http').get('http://localhost:4010/api/v1/health',(r)=>{process.exit(r.statusCode===200?0:1)}).on('error',()=>process.exit(1))"
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '1'
+        reservations:
+          memory: 128M
+          cpus: '0.25'
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '3'
+    networks:
+      falcon-net:
+        aliases:
+        - falcon-gateway
   api-gateway:
     build:
       context: ./apps/api-gateway
@@ -756,19 +801,19 @@ services:
       REDIS_HOST: falcon-redis
       REDIS_PORT: 6379
       NODE_ENV: production
-      NODE_OPTIONS: --max-old-space-size=512
+      NODE_OPTIONS: --max-old-space-size=4096
       DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@${POSTGRES_HOST}:${POSTGRES_PORT:-5432}/falcon_ai?schema=public
-      WORKERS: 2
-      THREADS: 2
-      SOURCE_WORKERS: 2
+      WORKERS: 8
+      THREADS: 4
+      SOURCE_WORKERS: 12
       GUNICORN_TIMEOUT: 0
       GUNICORN_GRACEFUL_TIMEOUT: 30
-      GUNICORN_MAX_REQUESTS: 300
-      GUNICORN_MAX_REQUESTS_JITTER: 30
+      GUNICORN_MAX_REQUESTS: 1000
+      GUNICORN_MAX_REQUESTS_JITTER: 100
       NEWS_SCROLL_REFRESH_INTERVAL_SECONDS: 15
       PROXY_ROTATOR_URL: http://proxy-rotator:8888
       PROXY_ENABLED: 'true'
-    shm_size: 4gb
+    shm_size: 8gb
     volumes:
     - worker_news_outputs:/app/outputs
     - ./apps/scrapers/worker-news/outputs:/app/outputs-host
@@ -788,319 +833,11 @@ services:
     deploy:
       resources:
         limits:
-          memory: 8G
-          cpus: '8'
+          memory: 12G
+          cpus: '12'
         reservations:
-          memory: 4G
-          cpus: '4'
-    logging:
-      driver: json-file
-      options:
-        max-size: 10m
-        max-file: '3'
-    networks:
-    - falcon-net
-  worker-news-media-1:
-    profiles: ["scrapers"]
-    build:
-      context: ./apps/scrapers/worker-news
-      dockerfile: Dockerfile
-    container_name: worker-news-media-1
-    restart: unless-stopped
-    environment:
-      PORT: 3012
-      REDIS_HOST: falcon-redis
-      REDIS_PORT: 6379
-      NODE_ENV: production
-      NODE_OPTIONS: --max-old-space-size=512
-      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@${POSTGRES_HOST}:${POSTGRES_PORT:-5432}/falcon_ai?schema=public
-      WORKERS: 2
-      THREADS: 2
-      SOURCE_WORKERS: 2
-      GUNICORN_TIMEOUT: 0
-      GUNICORN_GRACEFUL_TIMEOUT: 30
-      GUNICORN_MAX_REQUESTS: 300
-      GUNICORN_MAX_REQUESTS_JITTER: 30
-      NEWS_SCROLL_REFRESH_INTERVAL_SECONDS: 15
-    shm_size: 4gb
-    volumes:
-    - worker_news_outputs:/app/outputs
-    - ./apps/scrapers/worker-news/outputs:/app/outputs-host
-    depends_on:
-      redis:
-        condition: service_started
-    deploy:
-      resources:
-        limits:
-          memory: 4G
-          cpus: '4'
-        reservations:
-          memory: 1G
-          cpus: '1'
-    logging:
-      driver: json-file
-      options:
-        max-size: 10m
-        max-file: '3'
-    networks:
-    - falcon-net
-  worker-news-scheduler:
-    profiles: ["scrapers"]
-    build:
-      context: ./apps/scrapers/worker-news
-      dockerfile: Dockerfile
-    container_name: worker-news-scheduler
-    restart: unless-stopped
-    environment:
-      PORT: 3012
-      REDIS_HOST: falcon-redis
-      REDIS_PORT: 6379
-      NODE_ENV: production
-      NODE_OPTIONS: --max-old-space-size=512
-      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@${POSTGRES_HOST}:${POSTGRES_PORT:-5432}/falcon_ai?schema=public
-      WORKERS: 1
-      THREADS: 2
-      SOURCE_WORKERS: 1
-      GUNICORN_TIMEOUT: 0
-      GUNICORN_GRACEFUL_TIMEOUT: 30
-      GUNICORN_MAX_REQUESTS: 300
-      GUNICORN_MAX_REQUESTS_JITTER: 30
-      NEWS_SCROLL_REFRESH_INTERVAL_SECONDS: 15
-    shm_size: 4gb
-    volumes:
-    - worker_news_outputs:/app/outputs
-    - ./apps/scrapers/worker-news/outputs:/app/outputs-host
-    depends_on:
-      redis:
-        condition: service_started
-    deploy:
-      resources:
-        limits:
           memory: 2G
-          cpus: '1'
-        reservations:
-          memory: 512M
-          cpus: '0.25'
-    logging:
-      driver: json-file
-      options:
-        max-size: 10m
-        max-file: '3'
-    networks:
-    - falcon-net
-  worker-news-todays-scheduler:
-    profiles: ["scrapers"]
-    build:
-      context: ./apps/scrapers/worker-news
-      dockerfile: Dockerfile
-    container_name: worker-news-todays-scheduler
-    restart: unless-stopped
-    environment:
-      PORT: 3012
-      REDIS_HOST: falcon-redis
-      REDIS_PORT: 6379
-      NODE_ENV: production
-      NODE_OPTIONS: --max-old-space-size=512
-      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@${POSTGRES_HOST}:${POSTGRES_PORT:-5432}/falcon_ai?schema=public
-      WORKERS: 2
-      THREADS: 2
-      SOURCE_WORKERS: 1
-      GUNICORN_TIMEOUT: 0
-      GUNICORN_GRACEFUL_TIMEOUT: 30
-      GUNICORN_MAX_REQUESTS: 300
-      GUNICORN_MAX_REQUESTS_JITTER: 30
-      NEWS_SCROLL_REFRESH_INTERVAL_SECONDS: 15
-    shm_size: 4gb
-    volumes:
-    - worker_news_outputs:/app/outputs
-    - ./apps/scrapers/worker-news/outputs:/app/outputs-host
-    depends_on:
-      redis:
-        condition: service_started
-    deploy:
-      resources:
-        limits:
-          memory: 2G
-          cpus: '1'
-        reservations:
-          memory: 512M
-          cpus: '0.25'
-    logging:
-      driver: json-file
-      options:
-        max-size: 10m
-        max-file: '3'
-    networks:
-    - falcon-net
-  worker-news-trending-scheduler:
-    profiles: ["scrapers"]
-    build:
-      context: ./apps/scrapers/worker-news
-      dockerfile: Dockerfile
-    container_name: worker-news-trending-scheduler
-    restart: unless-stopped
-    environment:
-      PORT: 3012
-      REDIS_HOST: falcon-redis
-      REDIS_PORT: 6379
-      NODE_ENV: production
-      NODE_OPTIONS: --max-old-space-size=512
-      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@${POSTGRES_HOST}:${POSTGRES_PORT:-5432}/falcon_ai?schema=public
-      WORKERS: 2
-      THREADS: 2
-      SOURCE_WORKERS: 1
-      GUNICORN_TIMEOUT: 0
-      GUNICORN_GRACEFUL_TIMEOUT: 30
-      GUNICORN_MAX_REQUESTS: 300
-      GUNICORN_MAX_REQUESTS_JITTER: 30
-      NEWS_SCROLL_REFRESH_INTERVAL_SECONDS: 15
-    shm_size: 4gb
-    volumes:
-    - worker_news_outputs:/app/outputs
-    - ./apps/scrapers/worker-news/outputs:/app/outputs-host
-    depends_on:
-      redis:
-        condition: service_started
-    deploy:
-      resources:
-        limits:
-          memory: 2G
-          cpus: '1'
-        reservations:
-          memory: 512M
-          cpus: '0.25'
-    logging:
-      driver: json-file
-      options:
-        max-size: 10m
-        max-file: '3'
-    networks:
-    - falcon-net
-  worker-news-top-scheduler:
-    profiles: ["scrapers"]
-    build:
-      context: ./apps/scrapers/worker-news
-      dockerfile: Dockerfile
-    container_name: worker-news-top-scheduler
-    restart: unless-stopped
-    environment:
-      PORT: 3012
-      REDIS_HOST: falcon-redis
-      REDIS_PORT: 6379
-      NODE_ENV: production
-      NODE_OPTIONS: --max-old-space-size=512
-      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@${POSTGRES_HOST}:${POSTGRES_PORT:-5432}/falcon_ai?schema=public
-      WORKERS: 2
-      THREADS: 2
-      SOURCE_WORKERS: 1
-      GUNICORN_TIMEOUT: 0
-      GUNICORN_GRACEFUL_TIMEOUT: 30
-      GUNICORN_MAX_REQUESTS: 300
-      GUNICORN_MAX_REQUESTS_JITTER: 30
-      NEWS_SCROLL_REFRESH_INTERVAL_SECONDS: 15
-    shm_size: 4gb
-    volumes:
-    - worker_news_outputs:/app/outputs
-    - ./apps/scrapers/worker-news/outputs:/app/outputs-host
-    depends_on:
-      redis:
-        condition: service_started
-    deploy:
-      resources:
-        limits:
-          memory: 2G
-          cpus: '1'
-        reservations:
-          memory: 512M
-          cpus: '0.25'
-    logging:
-      driver: json-file
-      options:
-        max-size: 10m
-        max-file: '3'
-    networks:
-    - falcon-net
-  worker-news-map:
-    profiles: ["scrapers"]
-    build:
-      context: ./apps/scrapers/worker-news
-      dockerfile: Dockerfile
-    container_name: worker-news-map
-    restart: unless-stopped
-    environment:
-      PORT: 3012
-      REDIS_HOST: falcon-redis
-      REDIS_PORT: 6379
-      NODE_ENV: production
-      NODE_OPTIONS: --max-old-space-size=512
-      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@${POSTGRES_HOST}:${POSTGRES_PORT:-5432}/falcon_ai?schema=public
-      WORKERS: 1
-      THREADS: 2
-      SOURCE_WORKERS: 1
-      GUNICORN_TIMEOUT: 0
-      GUNICORN_GRACEFUL_TIMEOUT: 30
-      GUNICORN_MAX_REQUESTS: 300
-      GUNICORN_MAX_REQUESTS_JITTER: 30
-      NEWS_SCROLL_REFRESH_INTERVAL_SECONDS: 15
-    shm_size: 4gb
-    volumes:
-    - worker_news_outputs:/app/outputs
-    - ./apps/scrapers/worker-news/outputs:/app/outputs-host
-    depends_on:
-      redis:
-        condition: service_started
-    deploy:
-      resources:
-        limits:
-          memory: 2G
-          cpus: '1'
-        reservations:
-          memory: 512M
-          cpus: '0.25'
-    logging:
-      driver: json-file
-      options:
-        max-size: 10m
-        max-file: '3'
-    networks:
-    - falcon-net
-  worker-news-tv:
-    profiles: ["scrapers"]
-    build:
-      context: ./apps/scrapers/worker-news
-      dockerfile: Dockerfile
-    container_name: worker-news-tv
-    restart: unless-stopped
-    environment:
-      PORT: 3012
-      REDIS_HOST: falcon-redis
-      REDIS_PORT: 6379
-      NODE_ENV: production
-      NODE_OPTIONS: --max-old-space-size=512
-      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@${POSTGRES_HOST}:${POSTGRES_PORT:-5432}/falcon_ai?schema=public
-      WORKERS: 1
-      THREADS: 2
-      SOURCE_WORKERS: 1
-      GUNICORN_TIMEOUT: 0
-      GUNICORN_GRACEFUL_TIMEOUT: 30
-      GUNICORN_MAX_REQUESTS: 300
-      GUNICORN_MAX_REQUESTS_JITTER: 30
-      NEWS_SCROLL_REFRESH_INTERVAL_SECONDS: 15
-    shm_size: 4gb
-    volumes:
-    - worker_news_outputs:/app/outputs
-    - ./apps/scrapers/worker-news/outputs:/app/outputs-host
-    depends_on:
-      redis:
-        condition: service_started
-    deploy:
-      resources:
-        limits:
-          memory: 2G
-          cpus: '1'
-        reservations:
-          memory: 512M
-          cpus: '0.25'
+          cpus: '2'
     logging:
       driver: json-file
       options:

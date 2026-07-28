@@ -283,6 +283,8 @@ model User {
   lastName        String?
   roles           UserRole[] @default([USER])
   isActive        Boolean    @default(true)
+  phone           String?    // E.164, used by the SMS 2FA channel
+  phoneVerified   Boolean    @default(false)
   authProvider    AuthProvider @default(LOCAL)
   externalSubjectId String?
   refreshToken    String?
@@ -306,8 +308,45 @@ model User {
   permissions         UserPermission[]
 
   reportBookmarks      ReportBookmark[]
+  twoFactor            UserTwoFactor?
 
   @@map("users")
+}
+
+// 2FA enrollment state (Phase 1: TOTP). Kept in a separate 1:1 table so the
+// falcon-auth TypeORM User entity stays untouched — falcon-auth reads/writes
+// these rows via raw SQL on its DataSource.
+model UserTwoFactor {
+  userId        String    @id
+  totpSecretEnc String?   @db.Text // AES-256-GCM encrypted TOTP secret
+  enrolledAt    DateTime?
+  backupCodes   String[]  @default([]) // sha256 hashes of unused one-time codes
+  updatedAt     DateTime  @updatedAt
+
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_two_factor")
+}
+
+// One row per pending login/enrollment challenge (5-minute lifetime).
+// Tracks attempt counts server-side so codes can't be brute-forced.
+model TwoFactorChallenge {
+  id               String    @id @default(cuid())
+  userId           String
+  purpose          String // 'login' | 'enroll'
+  channel          String    @default("totp") // 'totp' | 'email' | 'sms'
+  pendingSecretEnc String?   @db.Text // enroll: encrypted candidate TOTP secret
+  pendingPhone     String? // sms enroll: phone being verified (saved on success)
+  codeHash         String? // email/sms: sha256 of the delivered 6-digit code
+  lastSentAt       DateTime? // email/sms: resend cooldown anchor
+  attempts         Int       @default(0)
+  expiresAt        DateTime
+  consumedAt       DateTime?
+  createdAt        DateTime  @default(now())
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("two_factor_challenges")
 }
 
 model UserPermission {
@@ -773,6 +812,7 @@ model RemoteExtensionHost {
   capabilities    Json?
   extensionVersion String?
   lastError       String?                   @db.Text
+  wakeRequestedAt DateTime?
   revokedAt       DateTime?
   createdAt       DateTime                  @default(now())
   updatedAt       DateTime                  @updatedAt
@@ -1077,6 +1117,10 @@ model TrendingCategoryIntelligence {
   whyTrending      String?         @db.Text // why this topic is currently trending
   keyDevelopments  String[]        @default([]) // timeline-like bullets
   potentialImpact  String?         @db.Text
+
+  // AI hybrid search content (BGE-M3, 1024 dimensions)
+  searchTsv        Unsupported("tsvector")? @map("search_tsv")
+  contentEmbedding Unsupported("vector(1024)")? @map("content_embedding")
 
   // Structured evidence/analytics
   topEntities      Json?           // [{name,type,count}, ...]
@@ -1651,6 +1695,10 @@ model PostComment {
   feedbacks         ProfileFeedback[]
   
   createdAt         DateTime        @default(now())
+
+  // AI hybrid search content (BGE-M3, 1024 dimensions)
+  searchTsv         Unsupported("tsvector")? @map("search_tsv")
+  textEmbedding     Unsupported("vector(1024)")? @map("text_embedding")
   
   @@unique([postId, platformCommentId])
   @@index([postId])
@@ -2028,6 +2076,10 @@ model SocialPostFactCheck {
   claimText           String            @db.Text
   claimType           String            // factual_event | policy_statement | quote_or_attribution | opinion_or_reaction | personal_or_greeting
   factCheckable       Boolean
+
+  // AI hybrid search content (BGE-M3, 1024 dimensions)
+  searchTsv           Unsupported("tsvector")? @map("search_tsv")
+  contentEmbedding    Unsupported("vector(1024)")? @map("content_embedding")
   
   // History bookkeeping
   isLatest            Boolean           @default(true)
@@ -2051,6 +2103,10 @@ model ProfileAIAnalytics {
   // Profile Summary
   profileSummary  String          @db.Text
   topic           String?         // Main topic/theme of the profile
+
+  // AI hybrid search content (BGE-M3, 1024 dimensions)
+  searchTsv       Unsupported("tsvector")? @map("search_tsv")
+  contentEmbedding Unsupported("vector(1024)")? @map("content_embedding")
   
   // Next Post Prediction
   nextPostContentType      String?
@@ -2112,6 +2168,10 @@ model PostAIAnalysis {
   
   // Post Summary
   summary         String          @db.Text
+
+  // AI hybrid search content (BGE-M3, 1024 dimensions)
+  searchTsv       Unsupported("tsvector")? @map("search_tsv")
+  contentEmbedding Unsupported("vector(1024)")? @map("content_embedding")
 
   // Single-sentence Bengali rationale: WHY this post is viral. Combines
   // content (topic / emotional weight) with comparative signal (velocity
@@ -2203,6 +2263,10 @@ model NewsAIAnalysis {
   detailedInsights       String?  @db.Text  // Comprehensive multi-paragraph analysis
   potentialBiases        String?  @db.Text  // Detected biases in sources
   recommendations        String[] @default([])  // Actionable recommendations
+
+  // AI hybrid search content (BGE-M3, 1024 dimensions)
+  searchTsv               Unsupported("tsvector")? @map("search_tsv")
+  contentEmbedding        Unsupported("vector(1024)")? @map("content_embedding")
   articleStats           Json?    // {totalArticles, analyzedArticles, positiveArticles, negativeArticles, neutralArticles}
   
   // Source Analysis
@@ -2567,6 +2631,10 @@ model Video {
   createdAt       DateTime            @default(now()) @map("created_at")
   updatedAt       DateTime            @updatedAt @map("updated_at")
 
+  // AI hybrid search content (BGE-M3, 1024 dimensions)
+  searchTsv       Unsupported("tsvector")? @map("search_tsv")
+  contentEmbedding Unsupported("vector(1024)")? @map("content_embedding")
+
   // ── Video viral-monitoring lifecycle (YouTube videos live here, not in
   // social_post). Mirrors the SocialPost viral fields so the video snapshot
   // pipeline can drive baseline → follow-up → recurring auto-schedule → stop /
@@ -2774,6 +2842,10 @@ model VideoSegment {
   isRedFlag       Boolean          @default(false) @map("is_red_flag")
   redFlagSeverity RedFlagSeverity? @map("red_flag_severity")
   redFlagReason   String?          @db.Text @map("red_flag_reason")
+
+  // AI hybrid search content (BGE-M3, 1024 dimensions)
+  searchTsv       Unsupported("tsvector")? @map("search_tsv")
+  textEmbedding   Unsupported("vector(1024)")? @map("text_embedding")
 
   topicEvidence VideoTopicEvidence[]
 
