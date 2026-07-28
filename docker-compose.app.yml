@@ -529,7 +529,7 @@ services:
     container_name: falcon-gateway
     restart: unless-stopped
     ports:
-    - 12060:4010
+    - 12016:4010
     environment:
       PORT: 4010
       NODE_ENV: production

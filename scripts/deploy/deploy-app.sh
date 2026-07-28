@@ -109,7 +109,7 @@ log "Starting application stack (COMPOSE_PROFILES=${COMPOSE_PROFILES:-<none>})..
 
 if [[ "${USE_GHCR}" == "1" ]]; then
   log "Recreating bytecode Python workers (run-py entrypoints)..."
-  "${COMPOSE[@]}" "${COMPOSE_ARGS[@]}" up -d --no-build --force-recreate "${GHCR_BYTECODE_WORKERS[@]}"
+  "${COMPOSE[@]}" "${COMPOSE_ARGS[@]}" up -d --no-build --remove-orphans --force-recreate "${GHCR_BYTECODE_WORKERS[@]}"
 fi
 
 if [[ "${USE_GHCR}" == "1" ]]; then
