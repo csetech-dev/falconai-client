@@ -35,7 +35,8 @@ help:
 	@echo "    make db-seed-news-sources seed News sources data (npm run seed:news-sources)"
 	@echo "    make db-seed-videos   seed demo video intelligence data"
 	@echo "    make db-status        migration status"
-	@echo "    make db-psql          list tables"
+	@echo "    make db-psql          psql client (args after ARGS=)"
+	@echo "    make db-backfill-tsv  populate search_tsv columns + GIN indexes for FTS"
 	@echo ""
 	@echo "  Backup:"
 	@echo "    make dump-db          dump Postgres DB to ./db-backups (uses Docker pg_dump)"
@@ -124,6 +125,9 @@ db-status:
 
 db-psql:
 	bash scripts/deploy/db.sh psql -- $(ARGS)
+
+db-backfill-tsv:
+	bash scripts/deploy/db.sh psql -- -f - < scripts/backfill/backfill-search-tsv.sql
 
 db-copy-schema:
 	bash scripts/deploy/db.sh copy-schema

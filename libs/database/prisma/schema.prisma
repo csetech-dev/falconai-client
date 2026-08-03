@@ -1657,9 +1657,18 @@ model PostComment {
   id                String          @id @default(cuid())
   postId            String
   post              SocialPost      @relation(fields: [postId], references: [id], onDelete: Cascade)
+  // NOTE: `campaignId` is the COMMENT AUTHOR's monitored profile (resolved by
+  // resolveCommentAuthorCampaign at ingest) — it is NOT the profile that owns
+  // the post. Use `ownerCampaignId` for "all comments on profile X".
   campaignId        String?
   campaign          Campaign?       @relation(fields: [campaignId], references: [id], onDelete: Cascade)
-  
+  // Denormalized copy of post.campaignId — the profile whose post this comment
+  // sits under. Exists so profile-wide comment streams (external sync API) are
+  // a single indexed range scan instead of a join through social_post.
+  // Populated at ingest; see scripts/backfill-comment-owner-campaign.sql for
+  // existing rows.
+  ownerCampaignId   String?         @map("owner_campaign_id")
+
   // Comment identifiers
   platformCommentId String?         // Original comment ID from platform
   
@@ -1707,6 +1716,12 @@ model PostComment {
   @@index([isRelevant])
   @@index([postedAt])
   @@index([campaignId, postedAt])
+  // Per-post drilldown keyset: ORDER BY postedAt, id within one post.
+  @@index([postId, postedAt, id])
+  // Profile-wide comment streams. scrapedAt is the incremental-sync key (never
+  // null); postedAt is the chronological one.
+  @@index([ownerCampaignId, scrapedAt])
+  @@index([ownerCampaignId, postedAt])
   @@map("post_comments")
 }
 
@@ -1735,6 +1750,8 @@ model PostShare {
   @@index([postId])
   @@index([sharerCampaignId])
   @@index([sharedAt])
+  // Per-post drilldown keyset: ORDER BY sharedAt, id within one post.
+  @@index([postId, sharedAt, id])
   @@map("post_shares")
 }
 
@@ -3097,6 +3114,63 @@ model ReportAuditEvent {
 }
 
 // ============================================
+// USER ACTION AUDIT — system-wide, append-only trail of consequential
+// user actions (create / update / delete + sensitive reads) across every
+// core-service module. Populated by the @Audit() decorator + global
+// AuditInterceptor. Deliberately generic (resource + resourceId) rather
+// than per-feature, and denormalizes actorEmail so the trail survives
+// user deletion.
+// ============================================
+
+enum AuditAction {
+  CREATE
+  READ
+  UPDATE
+  DELETE
+  EXECUTE // non-CRUD side-effecting action (trigger job, rotate key, run sync…)
+  LOGIN
+  LOGOUT
+}
+
+enum AuditOutcome {
+  SUCCESS
+  FAILURE
+}
+
+model UserAuditEvent {
+  id String @id @default(cuid())
+
+  /// Null for anonymous / unauthenticated actions. Not a hard FK on purpose:
+  /// audit rows must outlive the user they reference.
+  actorId    String?
+  /// Snapshot of the actor's email at action time (survives user deletion).
+  actorEmail String?
+
+  action   AuditAction
+  outcome  AuditOutcome @default(SUCCESS)
+  /// Logical resource type, e.g. "campaign", "social-account", "permission".
+  resource String
+  /// Affected entity id when known (from route param, body, or handler result).
+  resourceId String?
+
+  /// Free-form structured detail — changed fields, target user, job id, etc.
+  /// Sensitive values (passwords, tokens, keys) must be redacted before write.
+  metadata Json?
+
+  method    String? // HTTP verb
+  path      String? // request path (query stripped)
+  ipAddress String?
+  userAgent String?
+  createdAt DateTime @default(now())
+
+  @@index([actorId, createdAt])
+  @@index([resource, resourceId, createdAt])
+  @@index([action, createdAt])
+  @@index([createdAt])
+  @@map("user_audit_events")
+}
+
+// ============================================
 // REPORT TAXONOMY — user-editable category / topic-group / source-
 // group definitions the report-builder consumes. Initially seeded
 // from the constants under apps/core-service/src/reports/seed/, but
@@ -3250,6 +3324,11 @@ model ReportSourceGroup {
   labelEn     String
   description String?
   order       Int      @default(0)
+  /// Explicit campaign assignment — the propaganda sources the analyst
+  /// picked for this group in the taxonomy admin. The resolver joins
+  /// exactly these campaigns (org-wide) + their posts; a group with no
+  /// assigned campaigns renders empty.
+  campaignIds String[] @default([])
   isSystem    Boolean  @default(false)
   isDisabled  Boolean  @default(false)
   /// Soft-delete timestamp — see ReportCategoryPreset.deletedAt.
