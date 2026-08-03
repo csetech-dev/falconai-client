@@ -130,26 +130,23 @@ services:
   worker-news:
     <<: *worker-news-image
 
-  worker-news-media-1:
-    <<: *worker-news-image
-
-  worker-news-scheduler:
-    <<: *worker-news-image
-
-  worker-news-todays-scheduler:
-    <<: *worker-news-image
-
-  worker-news-trending-scheduler:
-    <<: *worker-news-image
-
-  worker-news-top-scheduler:
-    <<: *worker-news-image
-
-  worker-news-map:
-    <<: *worker-news-image
-
-  worker-news-tv:
-    <<: *worker-news-image
+  # REMOVED 2026-08-03 — worker-news-{media-1,scheduler,todays-scheduler,
+  # trending-scheduler,top-scheduler,map,tv}.
+  #
+  # These were defined here and NOWHERE else: no matching service in
+  # docker-compose.app.yml or docker-compose.yml. Compose merges service maps,
+  # so an overlay-only service is still created — which is why production grew
+  # containers like falcon-app-worker-news-top-scheduler-1. With no base service
+  # to merge with they inherited no command/env/volumes and simply ran the
+  # worker-news image default CMD (gunicorn app:app), i.e. idle duplicates of
+  # the worker-news API. Nothing ever routed to their hostnames.
+  #
+  # News scheduling lives in core-service (NewsScheduleService /
+  # NewsTopNewsScheduleService), which dispatches to WORKER_NEWS_URL ->
+  # http://worker-news:3012. Commit c906a50d (2026-06-27) dropped the last
+  # depends_on references; these stubs were the leftovers.
+  #
+  # Deploy with `--remove-orphans` to tear the running containers down.
 
   worker-telegram:
     <<: *ghcr-image
