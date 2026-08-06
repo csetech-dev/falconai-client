@@ -308,6 +308,7 @@ model User {
   permissions         UserPermission[]
 
   reportBookmarks      ReportBookmark[]
+  bookmarkCollections  BookmarkCollection[]
   twoFactor            UserTwoFactor?
 
   @@map("users")
@@ -3387,24 +3388,58 @@ model WildSearchBookmark {
 // REPORT BOOKMARKS (Report Cart)
 // ============================================
 
+/// A user-created folder/collection that groups bookmarked items together,
+/// like Facebook's "Saved" collections. A bookmark belongs to at most one
+/// collection; a null `collectionId` means it lives in the default
+/// "Uncategorized" bucket.
+model BookmarkCollection {
+  id          String           @id @default(cuid())
+  userId      String           @map("user_id")
+  user        User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// Display name of the collection (e.g. "Election 2026", "Viral Posts").
+  name        String
+  /// Optional description shown under the name in the UI.
+  description String?          @map("description")
+  /// Optional hex color used for the collection chip/icon in the UI.
+  color       String?
+  /// Optional emoji or lucide icon key used for the collection icon.
+  icon        String?
+
+  bookmarks   ReportBookmark[]
+
+  createdAt   DateTime         @default(now()) @map("created_at")
+  updatedAt   DateTime         @updatedAt      @map("updated_at")
+
+  @@unique([userId, name], map: "bc_user_name_key")
+  @@index([userId], map: "bc_user_id_idx")
+  @@map("bookmark_collections")
+}
+
 /// A bookmarked news article or social post collected for report generation.
 /// One row per bookmarked item, scoped to the user who bookmarked it.
 model ReportBookmark {
-  id              String   @id @default(cuid())
-  userId          String   @map("user_id")
-  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id              String             @id @default(cuid())
+  userId          String             @map("user_id")
+  user            User               @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   /// The original item ID (SocialPost.id or NewsArticle.id).
-  itemId          String   @map("item_id")
+  itemId          String             @map("item_id")
 
   /// 'news' or 'social'.
-  itemType        String   @map("item_type")
+  itemType        String             @map("item_type")
 
-  createdAt       DateTime @default(now()) @map("created_at")
-  updatedAt       DateTime @updatedAt @map("updated_at")
+  /// Optional reference to the BookmarkCollection this item belongs to.
+  /// Null means the item is in the default "Uncategorized" bucket.
+  collectionId    String?            @map("collection_id")
+  collection      BookmarkCollection? @relation(fields: [collectionId], references: [id], onDelete: SetNull)
+
+  createdAt       DateTime           @default(now()) @map("created_at")
+  updatedAt       DateTime           @updatedAt      @map("updated_at")
 
   @@unique([userId, itemId], map: "rb_user_item_key")
   @@index([userId], map: "rb_user_id_idx")
+  @@index([collectionId], map: "rb_collection_id_idx")
   @@index([createdAt], map: "rb_created_at_idx")
   @@map("report_bookmarks")
 }

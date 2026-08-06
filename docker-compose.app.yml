@@ -787,6 +787,31 @@ services:
         max-file: '3'
     networks:
     - falcon-net
+  flaresolverr:
+    profiles: ["scrapers"]
+    image: ghcr.io/flaresolverr/flaresolverr:latest
+    container_name: flaresolverr
+    restart: unless-stopped
+    environment:
+      LOG_LEVEL: info
+      TZ: UTC
+    ports:
+    - 8191:8191
+    deploy:
+      resources:
+        limits:
+          memory: 1024M
+          cpus: '1.0'
+        reservations:
+          memory: 256M
+          cpus: '0.25'
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '3'
+    networks:
+    - falcon-net
   worker-news:
     profiles: ["scrapers"]
     build:
@@ -813,12 +838,18 @@ services:
       NEWS_SCROLL_REFRESH_INTERVAL_SECONDS: 15
       PROXY_ROTATOR_URL: http://proxy-rotator:8888
       PROXY_ENABLED: 'true'
+      STUDIO_USE_PROXY: '1'
+      FLARESOLVERR_URL: http://flaresolverr:8191
+      FLARESOLVERR_ENABLED: 'true'
     shm_size: 8gb
     volumes:
     - worker_news_outputs:/app/outputs
     - ./apps/scrapers/worker-news/outputs:/app/outputs-host
+    - ./apps/scrapers/worker-news/studio_configs:/app/studio_configs
     depends_on:
       redis:
+        condition: service_started
+      flaresolverr:
         condition: service_started
     healthcheck:
       test:
@@ -1006,10 +1037,23 @@ services:
       # tmpfs below) + the resident VNC Chrome (~1.7G) can't blow the memory cap
       # and trigger OOM SIGKILL of the download workers.
       WORKER_CONCURRENCY: 2
-      GUNICORN_WORKERS: 2
+      # Multi-account lanes require a SINGLE gunicorn worker as the lane owner (the
+      # LaneManager semaphore + per-lane desktops live in one process); the
+      # download consumer acquires lanes over loopback HTTP. Extra threads keep
+      # health/status responsive while some threads block on lane acquire.
+      GUNICORN_WORKERS: 1
+      GUNICORN_THREADS: 16
       YT_API_KEY: ${YT_API_KEY:-}
       PROXY_ROTATOR_URL: http://proxy-rotator:8888
       PROXY_ENABLED: 'true'
+      # ── Multi-account "lane" routing (YouTube). Default ON. worker-video pulls
+      # its YOUTUBE SocialAccount registry from core and runs one login Chrome +
+      # noVNC per Gmail identity; downloads load-balance across lanes. Per-lane
+      # noVNC is reached via the gateway at /viewer/youtube/lane/<7910+i>/*.
+      YT_MULTI_ACCOUNT_ENABLED: "${YT_MULTI_ACCOUNT_ENABLED:-true}"
+      WORKER_VIDEO_LANE_PLATFORM: YOUTUBE
+      CORE_SERVICE_URL: http://falcon-core:4000
+      WORKER_API_PASSWORD: ${WORKER_API_PASSWORD:-85234569495721}
     shm_size: 2gb
     volumes:
     - video_downloads:/app/downloads
@@ -1018,6 +1062,8 @@ services:
     # worker-fb's facebook_vnc_profile. Otherwise every recreate wipes the
     # operator's session and downloads start hitting YouTube's bot check.
     - ./apps/scrapers/worker-video/youtube_vnc_profile:/app/youtube_vnc_profile
+    # Per-lane Chrome profiles (one dir per Gmail identity: /app/lanes/<i>/...)
+    - ./apps/scrapers/worker-video/lanes:/app/lanes
     tmpfs:
     - /app/downloads/tmp:size=5g,mode=1777
     depends_on:

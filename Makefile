@@ -13,7 +13,7 @@ help:
 	@echo "  Application stack:"
 	@echo "    make init-app         Create .env.app"
 	@echo "    make deploy-app       Start application stack (build from source)"
-	@echo "    make deploy-ghcr      Pull application stack from GHCR (no source build)"
+	@echo "    make deploy-ghcr      Pull app stack from GHCR (FlareSolverr = public ghcr.io/flaresolverr)"
 	@echo "    make setup-auto-deploy  Install webhook + deploy-agent for CI auto-deploy"
 	@echo "    make fix-crlf         Fix Windows CRLF in .env and shell scripts (Linux client)"
 	@echo "    make fix-worker-entrypoints  Fix worker-fb/worker-x python api.py crash (GHCR)"

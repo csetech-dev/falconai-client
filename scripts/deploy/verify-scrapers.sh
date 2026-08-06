@@ -16,6 +16,7 @@ SCRAPER_CONTAINERS=(
   worker-telegram
   worker-video
   worker-image
+  flaresolverr
 )
 
 CORE_WORKER_CONTAINERS=(

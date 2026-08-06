@@ -94,6 +94,7 @@ bash "${SCRIPT_DIR}/init-client-data.sh"
 
 if [[ "${USE_GHCR}" == "1" ]]; then
   log "GHCR mode: pulling ${GHCR_IMAGE_PREFIX} (tag: ${FALCON_IMAGE_TAG:-latest})..."
+  log "FlareSolverr uses public ghcr.io/flaresolverr/flaresolverr (not ${GHCR_IMAGE_PREFIX})."
   "${COMPOSE[@]}" "${COMPOSE_ARGS[@]}" pull
 fi
 

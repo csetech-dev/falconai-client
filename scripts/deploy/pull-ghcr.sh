@@ -43,6 +43,7 @@ if ! docker info >/dev/null 2>&1; then
 fi
 
 log "Pulling images from ${GHCR_IMAGE_PREFIX} (tag: ${FALCON_IMAGE_TAG:-latest})..."
+log "(FlareSolverr stays on public ghcr.io/flaresolverr/flaresolverr — not remapped to Falcon prefix)"
 # shellcheck disable=SC2086
 "${COMPOSE[@]}" "${ENV_ARGS[@]}" ${COMPOSE_FILES} -f "${ROOT_DIR}/docker-compose.ghcr.yml" pull
 

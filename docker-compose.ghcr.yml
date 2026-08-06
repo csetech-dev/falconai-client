@@ -50,6 +50,12 @@ x-web-worker-command: &web-worker-command
     - 'mkdir -p /app/.chrome-profile /app/lanes && chown -R root:root /app/.chrome-profile; Xvfb :99 -screen 0 1920x1080x24 -ac >/tmp/xvfb.log 2>&1 & while [ ! -S /tmp/.X11-unix/X99 ]; do sleep 0.2; done; export DISPLAY=:99; openbox --config-file /app/openbox-rc.xml >/tmp/openbox.log 2>&1 & x11vnc -display :99 -forever -shared -nopw -listen 0.0.0.0 -rfbport 5900 >/tmp/x11vnc.log 2>&1 & websockify --web=/usr/share/novnc/ 7900 localhost:5900 >/tmp/websockify.log 2>&1 & run-py api'
 
 services:
+  # Third-party public image (NOT Falcon GHCR_IMAGE_PREFIX).
+  # keep pin so `make deploy-ghcr` / pull never remaps flaresolverr to org registry.
+  flaresolverr:
+    image: ghcr.io/flaresolverr/flaresolverr:latest
+    pull_policy: always
+
   proxy-rotator:
     <<: *ghcr-image
     image: ${GHCR_IMAGE_PREFIX}/proxy-rotator:${FALCON_IMAGE_TAG:-latest}
