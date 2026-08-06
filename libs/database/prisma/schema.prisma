@@ -2305,6 +2305,8 @@ model NewsAIAnalysis {
   @@index([analysisScope])
   @@index([articleId])
   @@index([overallSentimentLabel])
+  @@index([articleId, overallSentimentLabel])
+  @@index([overallSentimentLabel, lastAnalyzedAt])
   @@map("news_ai_analysis")
 }
 

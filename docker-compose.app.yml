@@ -584,6 +584,7 @@ services:
     environment:
       MINIO_API_UPSTREAM: ${MINIO_ENDPOINT:-falcon-minio:9000}
       MINIO_CONSOLE_UPSTREAM: ${MINIO_CONSOLE_ENDPOINT:-falcon-minio:9001}
+      AI_DASHBOARD_UPSTREAM: ${AI_DASHBOARD_ENDPOINT:-host.docker.internal:3001}
     deploy:
       resources:
         limits:
@@ -828,20 +829,33 @@ services:
       NODE_ENV: production
       NODE_OPTIONS: --max-old-space-size=4096
       DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@${POSTGRES_HOST}:${POSTGRES_PORT:-5432}/falcon_ai?schema=public
-      WORKERS: 8
-      THREADS: 4
-      SOURCE_WORKERS: 12
-      GUNICORN_TIMEOUT: 0
+      WORKERS: ${NEWS_WORKERS:-4}
+      THREADS: ${NEWS_THREADS:-2}
+      SOURCE_WORKERS: ${SOURCE_WORKERS:-6}
+      # Never 0: an unbounded timeout lets a hung scrape pin its thread and its
+      # Chromium forever, which is how this container reached 7k PIDs / 12GiB.
+      GUNICORN_TIMEOUT: ${GUNICORN_TIMEOUT:-300}
       GUNICORN_GRACEFUL_TIMEOUT: 30
-      GUNICORN_MAX_REQUESTS: 1000
-      GUNICORN_MAX_REQUESTS_JITTER: 100
+      GUNICORN_MAX_REQUESTS: 200
+      GUNICORN_MAX_REQUESTS_JITTER: 50
+      # Browser lifetime caps — see news_scraper/utils/browser_manager.py
+      NEWS_BROWSER_MAX_AGE_SECONDS: ${NEWS_BROWSER_MAX_AGE_SECONDS:-600}
+      NEWS_BROWSER_MAX_USES: ${NEWS_BROWSER_MAX_USES:-50}
+      NEWS_BROWSER_REAPER_INTERVAL_SECONDS: ${NEWS_BROWSER_REAPER_INTERVAL_SECONDS:-60}
       NEWS_SCROLL_REFRESH_INTERVAL_SECONDS: 15
       PROXY_ROTATOR_URL: http://proxy-rotator:8888
       PROXY_ENABLED: 'true'
       STUDIO_USE_PROXY: '1'
       FLARESOLVERR_URL: http://flaresolverr:8191
       FLARESOLVERR_ENABLED: 'true'
-    shm_size: 8gb
+    # Chromium launches with --disable-dev-shm-usage, so a large /dev/shm is wasted
+    # reservation — and tmpfs pages are charged to this container's memory cgroup.
+    shm_size: 2gb
+    # tini as PID 1: orphaned Chromium processes reparent to it and get reaped,
+    # instead of accumulating as zombies under `sh -c`.
+    init: true
+    # A leak should fail loudly here rather than quietly consuming the host.
+    pids_limit: 1500
     volumes:
     - worker_news_outputs:/app/outputs
     - ./apps/scrapers/worker-news/outputs:/app/outputs-host
