@@ -584,7 +584,7 @@ services:
     environment:
       MINIO_API_UPSTREAM: ${MINIO_ENDPOINT:-falcon-minio:9000}
       MINIO_CONSOLE_UPSTREAM: ${MINIO_CONSOLE_ENDPOINT:-falcon-minio:9001}
-      AI_DASHBOARD_UPSTREAM: ${AI_DASHBOARD_ENDPOINT:-host.docker.internal:3001}
+      AI_DASHBOARD_UPSTREAM: ${AI_DASHBOARD_ENDPOINT:-host.docker.internal:3010}
     deploy:
       resources:
         limits:
