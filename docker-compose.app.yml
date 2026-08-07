@@ -884,7 +884,6 @@ services:
           pids: 1500
           memory: 12G
           cpus: '12'
-          pids: 1500
         reservations:
           memory: 2G
           cpus: '2'
