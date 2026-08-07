@@ -880,6 +880,8 @@ services:
     deploy:
       resources:
         limits:
+          # A leak should fail loudly here rather than quietly consuming the host.
+          pids: 1500
           memory: 12G
           cpus: '12'
           pids: 1500

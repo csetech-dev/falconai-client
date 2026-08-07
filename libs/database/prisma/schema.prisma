@@ -881,11 +881,18 @@ model SocialAccountEvent {
   accountId String
   account   SocialAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
 
-  type      String        // LOGIN | COOKIE_INVALID | COOLDOWN | ERROR | ENABLED | DISABLED | JOB | PROXY_CHANGED
+  type      String        // LOGIN | COOKIE_INVALID | COOLDOWN | ERROR | ENABLED | DISABLED | JOB | PROXY_CHANGED | CHECKPOINT | LOGGED_OUT | RESET | REAP
   message   String?       @db.Text
+  // Forensic context for lockout diagnosis: which scrape activity the account was
+  // performing when this event fired, and the URL it landed on (e.g. a redirect to
+  // .../checkpoint/...). Nullable + additive — pre-existing events keep working.
+  operation String?       // scrape op in flight: profile_posts | post_comments | post_shares | video_metrics | ...
+  url       String?       @db.Text // final/landed URL captured at event time (checkpoint/login-wall redirect)
+  detail    Json?         // extra structured context (classification, httpStatus, laneIndex, ...)
   createdAt DateTime      @default(now())
 
   @@index([accountId, createdAt])
+  @@index([accountId, type, createdAt])
   @@map("social_account_events")
 }
 
@@ -2293,6 +2300,9 @@ model NewsAIAnalysis {
 
   // Country-to-country relation extraction when present in article context
   relation               Json?    // {from: "bangladesh", to: "usa"}
+  // Indexed denormalized fields for Worldwide Bangladesh Coverage map queries
+  relationFrom           String?
+  relationTo             String?
   
   // Temporal Analysis
   volumeTrend            Json?    // [{date, count}, ...] article volume over time
@@ -2307,6 +2317,10 @@ model NewsAIAnalysis {
   @@index([overallSentimentLabel])
   @@index([articleId, overallSentimentLabel])
   @@index([overallSentimentLabel, lastAnalyzedAt])
+  @@index([relationFrom, relationTo])
+  @@index([relationFrom])
+  @@index([relationTo])
+  @@index([relationFrom, relationTo, lastAnalyzedAt])
   @@map("news_ai_analysis")
 }
 
