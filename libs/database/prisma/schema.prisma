@@ -1255,6 +1255,12 @@ model NewsSource {
   officialWebsite  String            @unique
   logoUrl          String?
   sourceType       NewsSourceType?   @default(main_stream)
+  /// True when this source was created/synced from News Studio builder configs.
+  /// Sticky: once true, hardcoded catalog sync must not clear it.
+  isBuiltFromStudio Boolean          @default(false) @map("is_built_from_studio")
+  isTop             Boolean          @default(false) @map("is_top")
+  isTodays          Boolean          @default(false) @map("is_todays")
+  isTrending        Boolean          @default(false) @map("is_trending")
 
   articles         NewsArticle[]
   mediaLinks       NewsMediaSource[]
@@ -1265,6 +1271,10 @@ model NewsSource {
   @@index([name])
   @@index([officialWebsite])
   @@index([sourceType])
+  @@index([isBuiltFromStudio])
+  @@index([isTop])
+  @@index([isTodays])
+  @@index([isTrending])
   @@map("news_sources")
 }
 
@@ -2654,6 +2664,8 @@ model Video {
   summary            String?             @db.Text
   matchedKeywordIds  String[]            @default([]) @map("matched_keyword_ids")
   analysisStatus     VideoAnalysisStatus @default(NOT_SENT) @map("analysis_status")
+  /// Overall video sentiment derived from segment majority (POSITIVE/NEUTRAL/NEGATIVE/MIXED).
+  sentimentLabel     String?             @map("sentiment_label")
   ingestionMethod VideoIngestionMethod @default(CAMPAIGN_SCRAPE) @map("ingestion_method")
   storageUrl      String?             @map("storage_url")
   campaignId      String?             @map("campaign_id")
@@ -2699,6 +2711,7 @@ model Video {
   @@index([kind], map: "video_kind_idx")
   @@index([analysisStatus], map: "video_analysis_status_idx")
   @@index([ingestionMethod], map: "video_ingestion_method_idx")
+  @@index([sentimentLabel], map: "video_sentiment_label_idx")
   @@map("videos")
 }
 
