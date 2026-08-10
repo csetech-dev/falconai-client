@@ -1,5 +1,5 @@
 .PHONY: init-storage init-app deploy-storage deploy-app deploy-ghcr deploy-status deploy-down fix-crlf fix-worker-entrypoints verify-scrapers clean-docker setup-auto-deploy logs-app logs-storage \
-	db-push db-push-loss db-generate db-seed db-seed-prompts db-seed-news-prompts db-seed-news-sources db-seed-videos db-status db-psql \
+	db-push db-push-loss db-generate db-seed db-seed-prompts db-seed-news-prompts db-seed-news-sources db-seed-videos db-status db-psql db-backfill-news-origin \
 	db-exec-push db-exec-push-loss db-exec-generate db-exec-seed db-exec-seed-prompts db-exec-seed-news-prompts db-exec-seed-news-sources db-exec-seed-videos db-exec-seed-twitter-profiles db-exec-seed-telegram-profiles db-copy-schema \
 	dump-db help
 
@@ -37,6 +37,7 @@ help:
 	@echo "    make db-status        migration status"
 	@echo "    make db-psql          psql client (args after ARGS=)"
 	@echo "    make db-backfill-tsv  populate search_tsv columns + GIN indexes for FTS"
+	@echo "    make db-backfill-news-origin  backfill news_articles.origin from legacy keyword category types"
 	@echo ""
 	@echo "  Backup:"
 	@echo "    make dump-db          dump Postgres DB to ./db-backups (uses Docker pg_dump)"
@@ -128,6 +129,9 @@ db-psql:
 
 db-backfill-tsv:
 	bash scripts/deploy/db.sh psql -- -f - < scripts/backfill/backfill-search-tsv.sql
+
+db-backfill-news-origin:
+	bash scripts/deploy/backfill-news-origin.sh
 
 db-copy-schema:
 	bash scripts/deploy/db.sh copy-schema

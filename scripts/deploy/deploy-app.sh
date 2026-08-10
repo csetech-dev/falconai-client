@@ -117,6 +117,8 @@ if [[ "${USE_GHCR}" == "1" ]]; then
   log "Applying Prisma schema (one-off container)..."
   bash "${SCRIPT_DIR}/db.sh" push || \
     warn "prisma db push failed — check DATABASE_URL in .env.app and falcon-core logs."
+  bash "${SCRIPT_DIR}/backfill-news-origin.sh" || \
+    warn "news origin backfill failed — falcon-core startup backfill will retry."
 fi
 
 if [[ "${BUILD_FLAG}" == "1" ]]; then

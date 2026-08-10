@@ -97,6 +97,16 @@ run_prisma_db_push() {
   fi
 }
 
+run_news_origin_backfill() {
+  echo "" >> "$OUTPUT_FILE"
+  log "[NEWS ORIGIN BACKFILL] Filling news_articles.origin from legacy keyword category types..."
+  if bash "$PROJECT_DIR/scripts/deploy/backfill-news-origin.sh" 2>&1 | tee -a "$OUTPUT_FILE"; then
+    log "[NEWS ORIGIN BACKFILL] succeeded"
+  else
+    warn "[NEWS ORIGIN BACKFILL] failed — falcon-core startup backfill will retry"
+  fi
+}
+
 ensure_deploy_dir() {
   mkdir -p "$DEPLOY_DIR"
 }
@@ -181,6 +191,7 @@ run_deployment() {
 
     # Schema ships inside the pulled falcon-core image — no host checkout required.
     run_prisma_db_push || return 1
+    run_news_origin_backfill
   else
     mapfile -t COMPOSE_FILE_ARGS < <(compose_args)
     # ---- Step 1: Sync repository to origin/main ----
@@ -235,6 +246,7 @@ run_deployment() {
     fi
 
     run_prisma_db_push || return 1
+    run_news_origin_backfill
   fi
 
   echo "" >> "$OUTPUT_FILE"

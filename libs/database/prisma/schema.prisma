@@ -903,6 +903,9 @@ model TechnicalPanelAiAutomationSetting {
   running       Boolean  @default(false)
   aiProvider    String   @default("falcon")
   aiModel       String   @default("web-grok/grok-expert")
+  // "sequential" (one request at a time) | "parallel" (bounded concurrent dispatch)
+  dispatchMode  String   @default("sequential")
+  concurrency   Int      @default(1)
   message       String?  @db.Text
   startedAt     DateTime?
   stoppedAt     DateTime?
@@ -1029,9 +1032,9 @@ model ScrapeResult {
   contentLength Int?        @map("content_length")
   matchedKeywords String[]  @default([]) @map("matched_keywords")
   
-  // Metadata - DO NOT USE THESE FIELDS, USE rawPublishedAt and rawScrapedAt INSTEAD
-  publishedAt  DateTime?    // UNUSED - Use rawPublishedAt instead
-  scrapedAt    DateTime?    // UNUSED - Use rawScrapedAt instead
+  // Date ownership mirrors NewsArticle: AI publication time, worker scrape time.
+  publishedAt  DateTime?
+  scrapedAt    DateTime?
   rawPublishedAt String?    // Raw date string from news worker
   rawScrapedAt   String?    // Raw scraped date string from news worker
   
@@ -1076,7 +1079,9 @@ model KeywordCategory {
   user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   
   // Ordering
-  sortOrder   Int       @default(0)
+  sortOrder        Int       @default(0)
+  /// When true, seed/default sort sync must not overwrite sortOrder (user reordered in UI).
+  sortOrderLocked  Boolean   @default(false)
   
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
@@ -1331,8 +1336,10 @@ model NewsArticle {
   author         String?
   title          String?
   url            String?
-  publishedAt    DateTime?    // UNUSED - Use rawPublishedAt instead
-  scrapedAt      DateTime?    // UNUSED - Use rawScrapedAt instead
+  /// Scrape provenance, e.g. /news/top_news or seed-news-media-group:print-media
+  origin         String?
+  publishedAt    DateTime?    // AI-normalized publication wall-clock
+  scrapedAt      DateTime?    // Worker scraped_at wall-clock
   rawPublishedAt String?      // Raw date string from news worker
   rawScrapedAt   String?      // Raw scraped date string from news worker
   category       String?
@@ -1342,6 +1349,9 @@ model NewsArticle {
   status          NewsStatus   @default(NOT_ANALYZED)
   aiAnalysisStatus String?      @default("PENDING")
   analysisStatus   String?      @default("PENDING")
+  // Set when an AI automation worker claims this row (status -> PROCESSING).
+  // NewsArticle has no updatedAt, so this is what the stale-claim reaper uses.
+  aiAnalysisClaimedAt DateTime?
 
   isAlarmingIncident Boolean   @default(false)
   isAcknowledged     Boolean   @default(false)
@@ -1364,14 +1374,22 @@ model NewsArticle {
   @@index([campaignId, scrapedAt])
   @@index([status])
   @@index([status, scrapedAt])
+  @@index([status, publishedAt])
   @@index([aiAnalysisStatus])
   @@index([analysisStatus])
   @@index([mediaId])
+  @@index([mediaId, publishedAt])
   @@index([sourceId])
   @@index([sourceId, scrapedAt])
+  @@index([sourceId, publishedAt])
   @@index([keywordCategoryId])
   @@index([keywordCategoryId, scrapedAt])
+  @@index([keywordCategoryId, publishedAt])
+  @@index([publishedAt])
   @@index([scrapedAt])
+  @@index([origin])
+  @@index([origin, publishedAt])
+  @@index([status, origin, publishedAt])
   @@index([divisionId])
   @@index([districtId])
   @@index([divisionId, sourceId, scrapedAt])
@@ -3519,4 +3537,125 @@ model LiveRecordTopic {
   @@index([channelId], map: "lrt_channel_id_idx")
   @@index([status], map: "lrt_status_idx")
   @@map("live_record_topics")
+}
+
+// ── falcon-gateway–owned tables ───────────────────────────────────────────────
+//
+// These four tables and two enums are created and used exclusively by
+// apps/falcon-gateway, which carries its own self-contained Prisma schema and
+// connects to this same `falcon_ai` database.
+//
+// They are mirrored here for ONE reason: `prisma db push` makes the database
+// match the schema it is given, which includes DROPPING tables it does not know
+// about — and it does so without prompting for --accept-data-loss when the
+// table happens to be empty. With these models absent, a routine `make db-push`
+// silently deleted the gateway's tables, and the gateway (which only bootstraps
+// its schema at startup) kept running until the next read failed with P2021
+// "table does not exist".
+//
+// Declaring them here makes core's db push preserve them instead.
+//
+// The gateway remains the owner: apps/falcon-gateway/src/prisma/db-init.service.ts
+// creates them at boot and prisma/init.sql holds the canonical DDL. These
+// definitions are a mirror and MUST stay byte-compatible with
+// apps/falcon-gateway/prisma/schema.prisma — if a column changes there, change
+// it here too, or the next db push will try to "correct" the live table.
+//
+// (This mirrors what the gateway already does in the other direction: it
+// redeclares Campaign, SocialPost, NewsArticle, Video and friends read-only.)
+
+enum IntegrationClientStatus {
+  ACTIVE
+  SUSPENDED
+  REVOKED
+}
+
+enum WebhookDeliveryStatus {
+  PENDING
+  SUCCESS
+  FAILED
+  DEAD
+}
+
+model IntegrationClient {
+  id            String                  @id @default(cuid())
+  name          String
+  description   String?
+  keyId         String                  @unique @map("key_id")
+  secretEnc     String                  @map("secret_enc")
+  scopes        String[]                @default([])
+  ipAllowlist   String[]                @default([]) @map("ip_allowlist")
+  status        IntegrationClientStatus @default(ACTIVE)
+  rateLimitRpm  Int                     @default(120) @map("rate_limit_rpm")
+  searchEnabled Boolean                 @default(false) @map("search_enabled")
+  ipEnforced    Boolean                 @default(true) @map("ip_enforced")
+  lastUsedAt    DateTime?               @map("last_used_at")
+  createdBy     String?                 @map("created_by")
+  createdAt     DateTime                @default(now()) @map("created_at")
+  updatedAt     DateTime                @default(now()) @updatedAt @map("updated_at")
+
+  webhookEndpoints WebhookEndpoint[]
+  deliveries       WebhookDelivery[]
+  requestLogs      RequestLog[]
+
+  @@index([status], map: "integration_client_status_idx")
+  @@map("integration_clients")
+}
+
+/// Append-only audit of every authenticated external request. Pruned by age.
+model RequestLog {
+  id            String            @id @default(cuid())
+  clientId      String            @map("client_id")
+  client        IntegrationClient @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  method        String
+  path          String
+  statusCode    Int               @map("status_code")
+  durationMs    Int?              @map("duration_ms")
+  responseBytes Int?              @map("response_bytes")
+  ip            String?
+  userAgent     String?           @map("user_agent")
+  createdAt     DateTime          @default(now()) @map("created_at")
+
+  @@index([clientId, createdAt], map: "request_log_client_created_idx")
+  @@index([createdAt], map: "request_log_created_idx")
+  @@map("request_logs")
+}
+
+model WebhookEndpoint {
+  id            String            @id @default(cuid())
+  clientId      String            @map("client_id")
+  client        IntegrationClient @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  url           String
+  signingSecret String            @map("signing_secret")
+  events        String[]          @default([])
+  enabled       Boolean           @default(true)
+  createdAt     DateTime          @default(now()) @map("created_at")
+  updatedAt     DateTime          @default(now()) @updatedAt @map("updated_at")
+
+  deliveries WebhookDelivery[]
+
+  @@index([clientId], map: "webhook_endpoint_client_idx")
+  @@map("webhook_endpoints")
+}
+
+model WebhookDelivery {
+  id           String                @id @default(cuid())
+  endpointId   String                @map("endpoint_id")
+  endpoint     WebhookEndpoint       @relation(fields: [endpointId], references: [id], onDelete: Cascade)
+  clientId     String                @map("client_id")
+  client       IntegrationClient     @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  event        String
+  payload      Json
+  status       WebhookDeliveryStatus @default(PENDING)
+  attempts     Int                   @default(0)
+  responseCode Int?                  @map("response_code")
+  errorMessage String?               @map("error_message")
+  nextRetryAt  DateTime?             @map("next_retry_at")
+  deliveredAt  DateTime?             @map("delivered_at")
+  createdAt    DateTime              @default(now()) @map("created_at")
+  updatedAt    DateTime              @default(now()) @updatedAt @map("updated_at")
+
+  @@index([status, nextRetryAt], map: "webhook_delivery_status_retry_idx")
+  @@index([endpointId], map: "webhook_delivery_endpoint_idx")
+  @@map("webhook_deliveries")
 }
