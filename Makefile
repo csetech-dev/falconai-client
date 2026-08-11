@@ -1,4 +1,4 @@
-.PHONY: init-storage init-app deploy-storage deploy-app deploy-ghcr deploy-status deploy-down fix-crlf fix-worker-entrypoints verify-scrapers clean-docker setup-auto-deploy logs-app logs-storage \
+.PHONY: init-storage init-app deploy-storage deploy-app deploy-ghcr deploy-status deploy-down fix-crlf fix-worker-entrypoints verify-scrapers sizing-check clean-docker setup-auto-deploy logs-app logs-storage \
 	db-push db-push-loss db-generate db-seed db-seed-prompts db-seed-news-prompts db-seed-news-sources db-seed-videos db-status db-psql db-backfill-news-origin \
 	db-exec-push db-exec-push-loss db-exec-generate db-exec-seed db-exec-seed-prompts db-exec-seed-news-prompts db-exec-seed-news-sources db-exec-seed-videos db-exec-seed-twitter-profiles db-exec-seed-telegram-profiles db-copy-schema \
 	dump-db help
@@ -12,6 +12,7 @@ help:
 	@echo ""
 	@echo "  Application stack:"
 	@echo "    make init-app         Create .env.app"
+	@echo "    make sizing-check     Dry-run FALCON_SIZING_PROFILE: does it fit this host?"
 	@echo "    make deploy-app       Start application stack (build from source)"
 	@echo "    make deploy-ghcr      Pull app stack from GHCR (FlareSolverr = public ghcr.io/flaresolverr)"
 	@echo "    make setup-auto-deploy  Install webhook + deploy-agent for CI auto-deploy"
@@ -81,6 +82,9 @@ fix-worker-entrypoints:
 
 verify-scrapers:
 	bash scripts/deploy/verify-scrapers.sh
+
+sizing-check:
+	bash scripts/ci/check-sizing-budget.sh
 
 deploy-status:
 	bash scripts/deploy/deploy.sh status
