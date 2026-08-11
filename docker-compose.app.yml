@@ -17,7 +17,7 @@ services:
     environment:
       discovery.type: single-node
       bootstrap.memory_lock: 'false'
-      OPENSEARCH_JAVA_OPTS: ${OPENSEARCH_JAVA_OPTS:--Xms512m -Xmx512m}
+      OPENSEARCH_JAVA_OPTS: ${OPENSEARCH_JAVA_OPTS:--Xms1g -Xmx1g}
       DISABLE_SECURITY_PLUGIN: 'true'
       indices.query.bool.max_clause_count: 8192
     ulimits:
@@ -40,11 +40,11 @@ services:
     deploy:
       resources:
         limits:
-          memory: 2G
-          cpus: '2'
+          memory: "${FALCON_SZ_OS_MEM:-2G}"
+          cpus: "${FALCON_SZ_OS_CPU:-2}"
         reservations:
-          memory: 512M
-          cpus: '0.5'
+          memory: "${FALCON_SZ_OS_MEM_RES:-512M}"
+          cpus: "${FALCON_SZ_OS_CPU_RES:-0.5}"
     logging:
       driver: json-file
       options:
@@ -71,12 +71,12 @@ services:
     deploy:
       resources:
         limits:
-          memory: 2G
-          cpus: '1'
+          memory: "${FALCON_SZ_REDIS_MEM:-1G}"
+          cpus: "${FALCON_SZ_REDIS_CPU:-1}"
         reservations:
-          memory: 512M
-          cpus: '0.25'
-    command: 'redis-server --maxmemory 512mb --maxmemory-policy noeviction --appendonly
+          memory: "${FALCON_SZ_REDIS_MEM_RES:-512M}"
+          cpus: "${FALCON_SZ_REDIS_CPU_RES:-0.25}"
+    command: 'redis-server --maxmemory ${REDIS_MAXMEMORY:-640mb} --maxmemory-policy noeviction --appendonly
       yes --appendfsync everysec --tcp-backlog 511 --timeout 0 --tcp-keepalive 300
 
       '
@@ -163,8 +163,8 @@ services:
     deploy:
       resources:
         limits:
-          memory: 256M
-          cpus: '0.5'
+          memory: "${FALCON_SZ_PROXY_MEM:-256M}"
+          cpus: "${FALCON_SZ_PROXY_CPU:-0.5}"
     logging:
       driver: json-file
       options:
@@ -182,8 +182,8 @@ services:
     deploy:
       resources:
         limits:
-          memory: 256M
-          cpus: '0.5'
+          memory: "${FALCON_SZ_ADMINER_MEM:-256M}"
+          cpus: "${FALCON_SZ_ADMINER_CPU:-0.5}"
     logging:
       driver: json-file
       options:
@@ -204,7 +204,7 @@ services:
       AUTH_SERVICE_URL: http://falcon-auth:3001/api/v1/auth
       NODE_ENV: production
       JWT_SECRET: ${JWT_SECRET:-falcon-ai-jwt-secret}
-      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@${POSTGRES_HOST}:${POSTGRES_PORT:-5432}/falcon_ai?schema=public&connection_limit=${CORE_DB_CONNECTION_LIMIT:-20}&pool_timeout=${CORE_DB_POOL_TIMEOUT:-20}&application_name=${CORE_DB_APP_NAME:-falcon-core}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@${POSTGRES_HOST}:${POSTGRES_PORT:-5432}/falcon_ai?schema=public&connection_limit=${CORE_DB_CONNECTION_LIMIT:-15}&pool_timeout=${CORE_DB_POOL_TIMEOUT:-20}&application_name=${CORE_DB_APP_NAME:-falcon-core}
       REDIS_HOST: falcon-redis
       REDIS_PORT: 6379
       EXTERNAL_AI_API_URL: http://203.190.12.139:8000
@@ -212,8 +212,8 @@ services:
       VIDEO_AI_API_URL: ${VIDEO_AI_API_URL:-}
       CORE_API_BASE_URL: ${PUBLIC_GATEWAY_URL}/api/core
       WEBHOOK_BASE_URL: ${PUBLIC_GATEWAY_URL}/api/core/ai-analysis
-      UV_THREADPOOL_SIZE: 16
-      NODE_OPTIONS: --max-old-space-size=2048
+      UV_THREADPOOL_SIZE: ${CORE_UV_THREADPOOL_SIZE:-16}
+      NODE_OPTIONS: --max-old-space-size=${CORE_NODE_HEAP_MB:-2048}
       MINIO_ENDPOINT: ${MINIO_ENDPOINT}
       MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-minioadmin}
       MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-minioadmin}
@@ -280,11 +280,11 @@ services:
     deploy:
       resources:
         limits:
-          memory: 2G
-          cpus: '2'
+          memory: "${FALCON_SZ_CORE_MEM:-3G}"
+          cpus: "${FALCON_SZ_CORE_CPU:-3}"
         reservations:
-          memory: 256M
-          cpus: '0.5'
+          memory: "${FALCON_SZ_CORE_MEM_RES:-256M}"
+          cpus: "${FALCON_SZ_CORE_CPU_RES:-0.5}"
     logging:
       driver: json-file
       options:
@@ -306,7 +306,7 @@ services:
       DATABASE_USER: ${POSTGRES_USER:-postgres}
       DATABASE_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
       DATABASE_NAME: falcon_ai
-      DATABASE_POOL_MAX: ${AUTH_DB_POOL_MAX:-10}
+      DATABASE_POOL_MAX: ${AUTH_DB_POOL_MAX:-8}
       DATABASE_POOL_IDLE_MS: ${AUTH_DB_POOL_IDLE_MS:-30000}
       DATABASE_APPLICATION_NAME: ${AUTH_DB_APP_NAME:-falcon-auth}
       JWT_SECRET: ${JWT_SECRET:-falcon-ai-jwt-secret}
@@ -350,11 +350,11 @@ services:
     deploy:
       resources:
         limits:
-          memory: 512M
-          cpus: '1'
+          memory: "${FALCON_SZ_AUTH_MEM:-512M}"
+          cpus: "${FALCON_SZ_AUTH_CPU:-1}"
         reservations:
-          memory: 128M
-          cpus: '0.25'
+          memory: "${FALCON_SZ_AUTH_MEM_RES:-128M}"
+          cpus: "${FALCON_SZ_AUTH_CPU_RES:-0.25}"
     logging:
       driver: json-file
       options:
@@ -391,11 +391,11 @@ services:
     deploy:
       resources:
         limits:
-          memory: 1G
-          cpus: '1'
+          memory: "${FALCON_SZ_KEYCLOAK_MEM:-1G}"
+          cpus: "${FALCON_SZ_KEYCLOAK_CPU:-1}"
         reservations:
-          memory: 256M
-          cpus: '0.25'
+          memory: "${FALCON_SZ_KEYCLOAK_MEM_RES:-256M}"
+          cpus: "${FALCON_SZ_KEYCLOAK_CPU_RES:-0.25}"
     logging:
       driver: json-file
       options:
@@ -415,9 +415,9 @@ services:
       PORT: 5000
       ANALYZER_TYPE: mock
       CORS_ORIGINS: http://localhost:12001,http://localhost:12010
-      UVICORN_WORKERS: 4
-      OMP_NUM_THREADS: 4
-      MKL_NUM_THREADS: 4
+      UVICORN_WORKERS: ${AI_UVICORN_WORKERS:-2}
+      OMP_NUM_THREADS: ${AI_OMP_NUM_THREADS:-2}
+      MKL_NUM_THREADS: ${AI_MKL_NUM_THREADS:-2}
       TOKENIZERS_PARALLELISM: 'true'
       PROXY_ROTATOR_URL: http://proxy-rotator:8888
       PROXY_ENABLED: 'true'
@@ -434,11 +434,11 @@ services:
     deploy:
       resources:
         limits:
-          memory: 10G
-          cpus: '4'
+          memory: "${FALCON_SZ_AIPY_MEM:-4G}"
+          cpus: "${FALCON_SZ_AIPY_CPU:-2}"
         reservations:
-          memory: 2G
-          cpus: '2'
+          memory: "${FALCON_SZ_AIPY_MEM_RES:-512M}"
+          cpus: "${FALCON_SZ_AIPY_CPU_RES:-0.5}"
     logging:
       driver: json-file
       options:
@@ -458,7 +458,7 @@ services:
       PORT: 4005
       NODE_ENV: production
       NODE_OPTIONS: --max-old-space-size=512
-      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@${POSTGRES_HOST}:${POSTGRES_PORT:-5432}/falcon_ai?schema=public&connection_limit=${ANALYTICS_DB_CONNECTION_LIMIT:-10}&pool_timeout=${ANALYTICS_DB_POOL_TIMEOUT:-20}&application_name=${ANALYTICS_DB_APP_NAME:-falcon-analytics}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@${POSTGRES_HOST}:${POSTGRES_PORT:-5432}/falcon_ai?schema=public&connection_limit=${ANALYTICS_DB_CONNECTION_LIMIT:-8}&pool_timeout=${ANALYTICS_DB_POOL_TIMEOUT:-20}&application_name=${ANALYTICS_DB_APP_NAME:-falcon-analytics}
     healthcheck:
       interval: 30s
       timeout: 10s
@@ -472,11 +472,11 @@ services:
     deploy:
       resources:
         limits:
-          memory: 512M
-          cpus: '1'
+          memory: "${FALCON_SZ_ANALYTICS_MEM:-512M}"
+          cpus: "${FALCON_SZ_ANALYTICS_CPU:-1}"
         reservations:
-          memory: 128M
-          cpus: '0.25'
+          memory: "${FALCON_SZ_ANALYTICS_MEM_RES:-128M}"
+          cpus: "${FALCON_SZ_ANALYTICS_CPU_RES:-0.25}"
     logging:
       driver: json-file
       options:
@@ -512,11 +512,11 @@ services:
     deploy:
       resources:
         limits:
-          memory: 512M
-          cpus: '1'
+          memory: "${FALCON_SZ_SEARCH_MEM:-512M}"
+          cpus: "${FALCON_SZ_SEARCH_CPU:-1}"
         reservations:
-          memory: 128M
-          cpus: '0.25'
+          memory: "${FALCON_SZ_SEARCH_MEM_RES:-128M}"
+          cpus: "${FALCON_SZ_SEARCH_CPU_RES:-0.25}"
     logging:
       driver: json-file
       options:
@@ -562,11 +562,11 @@ services:
     deploy:
       resources:
         limits:
-          memory: 512M
-          cpus: '1'
+          memory: "${FALCON_SZ_FGW_MEM:-512M}"
+          cpus: "${FALCON_SZ_FGW_CPU:-1}"
         reservations:
-          memory: 128M
-          cpus: '0.25'
+          memory: "${FALCON_SZ_FGW_MEM_RES:-128M}"
+          cpus: "${FALCON_SZ_FGW_CPU_RES:-0.25}"
     logging:
       driver: json-file
       options:
@@ -594,8 +594,8 @@ services:
     deploy:
       resources:
         limits:
-          memory: 1G
-          cpus: '1'
+          memory: "${FALCON_SZ_APIGW_MEM:-512M}"
+          cpus: "${FALCON_SZ_APIGW_CPU:-1}"
     logging:
       driver: json-file
       options:
@@ -612,7 +612,7 @@ services:
     restart: unless-stopped
     environment:
       PORT: 3016
-      WORKERS: 2
+      WORKERS: ${BOT_DETECTION_WORKERS:-2}
       WORKER_API_PASSWORD: ${WORKER_API_PASSWORD:-85234569495721}
       LOG_LEVEL: INFO
     healthcheck:
@@ -628,11 +628,11 @@ services:
     deploy:
       resources:
         limits:
-          memory: 1G
-          cpus: '2'
+          memory: "${FALCON_SZ_BOTDET_MEM:-768M}"
+          cpus: "${FALCON_SZ_BOTDET_CPU:-1}"
         reservations:
-          memory: 256M
-          cpus: '0.5'
+          memory: "${FALCON_SZ_BOTDET_MEM_RES:-256M}"
+          cpus: "${FALCON_SZ_BOTDET_CPU_RES:-0.25}"
     logging:
       driver: json-file
       options:
@@ -667,6 +667,9 @@ services:
       MINIO_USE_SSL: 'false'
       MINIO_PUBLIC_ENDPOINT: ${MINIO_PUBLIC_ENDPOINT:-localhost:12004}
       MINIO_PUBLIC_USE_SSL: 'false'
+      # Comment-fetch thread pool width (scraper.py / backupscrapper.py).
+      FB_SCRAPE_THREADS: ${FB_SCRAPE_THREADS:-16}
+      FB_METRICS_CONCURRENCY: ${FB_METRICS_CONCURRENCY:-4}
       # Multi-account routing — per-lane VNC login + scrape
       FB_MULTI_ACCOUNT_ENABLED: "true"
       FB_REMOTE_EXTENSION_SCRAPING_ENABLED: "${FB_REMOTE_EXTENSION_SCRAPING_ENABLED:-true}"
@@ -688,7 +691,7 @@ services:
       noblank >/dev/null 2>&1; sleep 30; done) & fi; run-py api
 
       '
-    shm_size: 4gb
+    shm_size: "${FALCON_SZ_FB_SHM:-1gb}"
     volumes:
     - ./apps/scrapers/worker-fb/cookies.json:/app/cookies.json
     - ./apps/scrapers/worker-fb/facebook_vnc_profile:/app/facebook_vnc_profile
@@ -709,11 +712,11 @@ services:
     deploy:
       resources:
         limits:
-          memory: 22G
-          cpus: '12'
+          memory: "${FALCON_SZ_FB_MEM:-4G}"
+          cpus: "${FALCON_SZ_FB_CPU:-3}"
         reservations:
-          memory: 4G
-          cpus: '4'
+          memory: "${FALCON_SZ_FB_MEM_RES:-1G}"
+          cpus: "${FALCON_SZ_FB_CPU_RES:-1}"
     logging:
       driver: json-file
       options:
@@ -759,9 +762,7 @@ services:
       -dpms s noblank >/dev/null 2>&1; sleep 30; done) & fi; run-py api
 
       '
-    shm_size: 4gb
-    mem_limit: 2g
-    cpus: '2.0'
+    shm_size: "${FALCON_SZ_LI_SHM:-512mb}"
     volumes:
     - ./apps/scrapers/worker-linkedin/linkedin_chrome_profile:/app/linkedin_chrome_profile
     - ./apps/scrapers/worker-linkedin/lanes:/app/lanes
@@ -782,11 +783,11 @@ services:
     deploy:
       resources:
         limits:
-          memory: 2G
-          cpus: '2'
+          memory: "${FALCON_SZ_LI_MEM:-1536M}"
+          cpus: "${FALCON_SZ_LI_CPU:-1.5}"
         reservations:
-          memory: 512M
-          cpus: '0.5'
+          memory: "${FALCON_SZ_LI_MEM_RES:-384M}"
+          cpus: "${FALCON_SZ_LI_CPU_RES:-0.25}"
     logging:
       driver: json-file
       options:
@@ -807,11 +808,11 @@ services:
     deploy:
       resources:
         limits:
-          memory: 1024M
-          cpus: '1.0'
+          memory: "${FALCON_SZ_FLARE_MEM:-1024M}"
+          cpus: "${FALCON_SZ_FLARE_CPU:-1.0}"
         reservations:
-          memory: 256M
-          cpus: '0.25'
+          memory: "${FALCON_SZ_FLARE_MEM_RES:-256M}"
+          cpus: "${FALCON_SZ_FLARE_CPU_RES:-0.25}"
     logging:
       driver: json-file
       options:
@@ -837,7 +838,7 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@${POSTGRES_HOST}:${POSTGRES_PORT:-5432}/falcon_ai?schema=public
       CORE_SERVICE_URL: http://falcon-core:4000
       WORKER_API_PASSWORD: ${WORKER_API_PASSWORD:-85234569495721}
-      WORKERS: ${NEWS_WORKERS:-4}
+      WORKERS: ${NEWS_WORKERS:-2}
       THREADS: ${NEWS_THREADS:-2}
       SOURCE_WORKERS: ${SOURCE_WORKERS:-2}
       # Never 0: an unbounded timeout lets a hung scrape pin its thread and its
@@ -850,14 +851,14 @@ services:
       NEWS_BROWSER_MAX_AGE_SECONDS: ${NEWS_BROWSER_MAX_AGE_SECONDS:-180}
       NEWS_BROWSER_MAX_USES: ${NEWS_BROWSER_MAX_USES:-15}
       NEWS_BROWSER_REAPER_INTERVAL_SECONDS: ${NEWS_BROWSER_REAPER_INTERVAL_SECONDS:-15}
-      NEWS_BROWSER_TOTAL_SLOTS: ${NEWS_BROWSER_TOTAL_SLOTS:-10}
+      NEWS_BROWSER_TOTAL_SLOTS: ${NEWS_BROWSER_TOTAL_SLOTS:-6}
       NEWS_BROWSER_STUDIO_RESERVED: ${NEWS_BROWSER_STUDIO_RESERVED:-2}
-      NEWS_BROWSER_AUTO_SLOTS: ${NEWS_BROWSER_AUTO_SLOTS:-6}
+      NEWS_BROWSER_AUTO_SLOTS: ${NEWS_BROWSER_AUTO_SLOTS:-3}
       NEWS_BROWSER_AUTO_WHEN_STUDIO: ${NEWS_BROWSER_AUTO_WHEN_STUDIO:-0}
       NEWS_BROWSER_INTERACTIVE_SLOTS: ${NEWS_BROWSER_INTERACTIVE_SLOTS:-2}
       NEWS_BROWSER_INTERACTIVE_WHEN_STUDIO: ${NEWS_BROWSER_INTERACTIVE_WHEN_STUDIO:-0}
       NEWS_BROWSER_LANE_ACQUIRE_TIMEOUT: ${NEWS_BROWSER_LANE_ACQUIRE_TIMEOUT:-45}
-      NEWS_BROWSER_MAX_LIVE: ${NEWS_BROWSER_MAX_LIVE:-10}
+      NEWS_BROWSER_MAX_LIVE: ${NEWS_BROWSER_MAX_LIVE:-6}
       NEWS_BROWSER_PROCS_PER_SLOT: ${NEWS_BROWSER_PROCS_PER_SLOT:-12}
       NEWS_BROWSER_RELEASE_ON_CONTEXT_CLOSE: ${NEWS_BROWSER_RELEASE_ON_CONTEXT_CLOSE:-1}
       NEWS_BROWSER_ORPHAN_KILL: ${NEWS_BROWSER_ORPHAN_KILL:-1}
@@ -865,6 +866,9 @@ services:
       NEWS_BROWSER_LAUNCH_WAIT_SECONDS: ${NEWS_BROWSER_LAUNCH_WAIT_SECONDS:-20}
       NEWS_CLEAR_LANES_ON_START: ${NEWS_CLEAR_LANES_ON_START:-1}
 
+      # Per-source article fetch pool (news_scraper/base_scraper.py). Stacks on top
+      # of WORKERS x THREADS, so it is sized by the profile, not left at the code default.
+      NEWS_ARTICLE_EXECUTOR_WORKERS: ${NEWS_ARTICLE_EXECUTOR_WORKERS:-16}
       NEWS_ARTICLE_TIMEOUT_SECONDS: ${NEWS_ARTICLE_TIMEOUT_SECONDS:-30}
       NEWS_SOURCE_TIMEOUT_SECONDS: ${NEWS_SOURCE_TIMEOUT_SECONDS:-180}
       NEWS_TOP_NEWS_SOURCE_TIMEOUT_SECONDS: ${NEWS_TOP_NEWS_SOURCE_TIMEOUT_SECONDS:-180}
@@ -877,14 +881,14 @@ services:
       FLARESOLVERR_ENABLED: 'true'
     # Chromium launches with --disable-dev-shm-usage, so a large /dev/shm is wasted
     # reservation — and tmpfs pages are charged to this container's memory cgroup.
-    shm_size: 2gb
+    shm_size: "${FALCON_SZ_NEWS_SHM:-1gb}"
     # tini as PID 1: orphaned Chromium processes reparent to it and get reaped,
     # instead of accumulating as zombies under `sh -c`.
     init: true
     # A leak should fail loudly here rather than quietly consuming the host.
     # Kept in sync with deploy.resources.limits.pids below: Compose v5 rejects the
     # project when the two differ, and treats an absent one as 0.
-    pids_limit: 1500
+    pids_limit: "${FALCON_SZ_NEWS_PIDS:-800}"
     volumes:
     - worker_news_outputs:/app/outputs
     - ./apps/scrapers/worker-news/outputs:/app/outputs-host
@@ -908,12 +912,12 @@ services:
       resources:
         limits:
           # A leak should fail loudly here rather than quietly consuming the host.
-          pids: 1500
-          memory: 12G
-          cpus: '12'
+          pids: "${FALCON_SZ_NEWS_PIDS:-800}"
+          memory: "${FALCON_SZ_NEWS_MEM:-6G}"
+          cpus: "${FALCON_SZ_NEWS_CPU:-4}"
         reservations:
-          memory: 2G
-          cpus: '2'
+          memory: "${FALCON_SZ_NEWS_MEM_RES:-512M}"
+          cpus: "${FALCON_SZ_NEWS_CPU_RES:-1}"
     logging:
       driver: json-file
       options:
@@ -957,7 +961,7 @@ services:
       7900 localhost:5900 >/tmp/websockify.log 2>&1 & run-py app
 
       '
-    shm_size: 4gb
+    shm_size: "${FALCON_SZ_X_SHM:-1gb}"
     volumes:
     - ./apps/scrapers/worker-x/x_chrome_profile:/app/x_chrome_profile
     - ./apps/scrapers/worker-x/lanes:/app/lanes
@@ -977,11 +981,11 @@ services:
     deploy:
       resources:
         limits:
-          memory: 8192M
-          cpus: '4'
+          memory: "${FALCON_SZ_X_MEM:-2G}"
+          cpus: "${FALCON_SZ_X_CPU:-2}"
         reservations:
-          memory: 2048M
-          cpus: '2'
+          memory: "${FALCON_SZ_X_MEM_RES:-512M}"
+          cpus: "${FALCON_SZ_X_CPU_RES:-0.5}"
     logging:
       driver: json-file
       options:
@@ -1012,7 +1016,7 @@ services:
       TELEGRAM_PASSWORD: ${TELEGRAM_PASSWORD:-}
       CORE_SERVICE_URL: http://falcon-core:4000
       WORKER_API_PASSWORD: ${WORKER_API_PASSWORD:-85234569495721}
-    shm_size: 2gb
+    shm_size: "${FALCON_SZ_TG_SHM:-256mb}"
     volumes:
     - telegram_sessions:/app/sessions
     depends_on:
@@ -1031,11 +1035,11 @@ services:
     deploy:
       resources:
         limits:
-          memory: 512M
-          cpus: '1'
+          memory: "${FALCON_SZ_TG_MEM:-512M}"
+          cpus: "${FALCON_SZ_TG_CPU:-1}"
         reservations:
-          memory: 128M
-          cpus: '0.25'
+          memory: "${FALCON_SZ_TG_MEM_RES:-128M}"
+          cpus: "${FALCON_SZ_TG_CPU_RES:-0.25}"
     logging:
       driver: json-file
       options:
@@ -1081,13 +1085,13 @@ services:
       # Bounded so concurrent yt-dlp/ffmpeg downloads (which write to the RAM
       # tmpfs below) + the resident VNC Chrome (~1.7G) can't blow the memory cap
       # and trigger OOM SIGKILL of the download workers.
-      WORKER_CONCURRENCY: 2
+      WORKER_CONCURRENCY: ${VIDEO_WORKER_CONCURRENCY:-2}
       # Multi-account lanes require a SINGLE gunicorn worker as the lane owner (the
       # LaneManager semaphore + per-lane desktops live in one process); the
       # download consumer acquires lanes over loopback HTTP. Extra threads keep
       # health/status responsive while some threads block on lane acquire.
       GUNICORN_WORKERS: 1
-      GUNICORN_THREADS: 16
+      GUNICORN_THREADS: ${VIDEO_GUNICORN_THREADS:-8}
       YT_API_KEY: ${YT_API_KEY:-}
       PROXY_ROTATOR_URL: http://proxy-rotator:8888
       PROXY_ENABLED: 'true'
@@ -1099,7 +1103,7 @@ services:
       WORKER_VIDEO_LANE_PLATFORM: YOUTUBE
       CORE_SERVICE_URL: http://falcon-core:4000
       WORKER_API_PASSWORD: ${WORKER_API_PASSWORD:-85234569495721}
-    shm_size: 2gb
+    shm_size: "${FALCON_SZ_VIDEO_SHM:-1gb}"
     volumes:
     - video_downloads:/app/downloads
     - ./apps/scrapers/worker-video/cookies.txt:/app/cookies.txt:rw
@@ -1130,11 +1134,11 @@ services:
           # Must fit: VNC Chrome (~1.7G) + the 5G download tmpfs (RAM-backed,
           # counts against this cgroup) + concurrent yt-dlp/ffmpeg. 2G caused
           # constant OOM SIGKILL of downloads.
-          memory: 6G
-          cpus: '2'
+          memory: "${FALCON_SZ_VIDEO_MEM:-2G}"
+          cpus: "${FALCON_SZ_VIDEO_CPU:-1.5}"
         reservations:
-          memory: 512M
-          cpus: '0.5'
+          memory: "${FALCON_SZ_VIDEO_MEM_RES:-512M}"
+          cpus: "${FALCON_SZ_VIDEO_CPU_RES:-0.25}"
     logging:
       driver: json-file
       options:
@@ -1185,7 +1189,7 @@ services:
     depends_on:
       redis:
         condition: service_started
-    shm_size: 4gb
+    shm_size: "${FALCON_SZ_WEBW_SHM:-1gb}"
     healthcheck:
       interval: 30s
       timeout: 10s
@@ -1199,11 +1203,11 @@ services:
     deploy:
       resources:
         limits:
-          memory: 12G
-          cpus: '6'
+          memory: "${FALCON_SZ_WEBW_MEM:-3G}"
+          cpus: "${FALCON_SZ_WEBW_CPU:-2}"
         reservations:
-          memory: 1G
-          cpus: '2'
+          memory: "${FALCON_SZ_WEBW_MEM_RES:-512M}"
+          cpus: "${FALCON_SZ_WEBW_CPU_RES:-0.5}"
     logging:
       driver: json-file
       options:
@@ -1221,6 +1225,8 @@ services:
     environment:
       PYTHONUNBUFFERED: 1
       DISPLAY: :99
+      # Concurrent Chromium tabs (asyncio.Semaphore in worker-image/api.py).
+      IMAGE_MAX_CONCURRENT_TABS: ${IMAGE_MAX_CONCURRENT_TABS:-4}
       IMAGE_WORKER_PROFILE_DIR: /app/image_chrome_profile
       IMAGE_WORKER_VIEWER_URL: http://localhost:12095/viewer
       IMAGE_WORKER_RAW_NOVNC_URL: http://localhost:12095/vnc/vnc.html?autoconnect=1&resize=scale&path=vnc/websockify
@@ -1238,7 +1244,7 @@ services:
       '
     volumes:
     - ./apps/scrapers/worker-image/image_chrome_profile:/app/image_chrome_profile
-    shm_size: 4gb
+    shm_size: "${FALCON_SZ_IMAGE_SHM:-1gb}"
     healthcheck:
       interval: 30s
       timeout: 10s
@@ -1252,11 +1258,11 @@ services:
     deploy:
       resources:
         limits:
-          memory: 8G
-          cpus: '4'
+          memory: "${FALCON_SZ_IMAGE_MEM:-2G}"
+          cpus: "${FALCON_SZ_IMAGE_CPU:-1.5}"
         reservations:
-          memory: 1G
-          cpus: '2'
+          memory: "${FALCON_SZ_IMAGE_MEM_RES:-512M}"
+          cpus: "${FALCON_SZ_IMAGE_CPU_RES:-0.25}"
     logging:
       driver: json-file
       options:
@@ -1291,7 +1297,7 @@ services:
       '
     volumes:
     - ./apps/internal-ai/internal-ai-profile:/app/internal-ai-profile
-    shm_size: 4gb
+    shm_size: "${FALCON_SZ_INTAI_SHM:-1gb}"
     healthcheck:
       interval: 30s
       timeout: 10s
@@ -1303,11 +1309,11 @@ services:
     deploy:
       resources:
         limits:
-          memory: 4G
-          cpus: '2'
+          memory: "${FALCON_SZ_INTAI_MEM:-2G}"
+          cpus: "${FALCON_SZ_INTAI_CPU:-1.5}"
         reservations:
-          memory: 512M
-          cpus: '0.5'
+          memory: "${FALCON_SZ_INTAI_MEM_RES:-512M}"
+          cpus: "${FALCON_SZ_INTAI_CPU_RES:-0.25}"
     logging:
       driver: json-file
       options:
@@ -1328,6 +1334,11 @@ services:
     - 12110:12110
     volumes:
     - ./infra/nginx/scraper-viewer-proxy.conf:/etc/nginx/nginx.conf:ro
+    deploy:
+      resources:
+        limits:
+          memory: "${FALCON_SZ_VIEWER_MEM:-256M}"
+          cpus: "${FALCON_SZ_VIEWER_CPU:-0.5}"
     logging:
       driver: json-file
       options:
@@ -1363,11 +1374,11 @@ services:
     deploy:
       resources:
         limits:
-          memory: 256M
-          cpus: '0.5'
+          memory: "${FALCON_SZ_FRONT_MEM:-256M}"
+          cpus: "${FALCON_SZ_FRONT_CPU:-0.5}"
         reservations:
-          memory: 64M
-          cpus: '0.1'
+          memory: "${FALCON_SZ_FRONT_MEM_RES:-64M}"
+          cpus: "${FALCON_SZ_FRONT_CPU_RES:-0.1}"
     logging:
       driver: json-file
       options:

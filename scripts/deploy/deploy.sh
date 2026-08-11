@@ -42,12 +42,14 @@ cmd_status() {
 
   if [[ "${target}" == "storage" || "${target}" == "all" ]] && [[ -f "${ROOT_DIR}/.env.storage" ]]; then
     log "Storage stack:"
-    "${COMPOSE[@]}" --env-file "${ROOT_DIR}/.env.storage" -f "${STORAGE_COMPOSE}" ps
+    resolve_sizing_file_quiet "${ROOT_DIR}/.env.storage"
+    "${COMPOSE[@]}" --env-file "${SIZING_ENV_FILE}" --env-file "${ROOT_DIR}/.env.storage" -f "${STORAGE_COMPOSE}" ps
   fi
 
   if [[ "${target}" == "app" || "${target}" == "all" ]] && [[ -f "${ROOT_DIR}/.env.app" ]]; then
     log "Application stack:"
-    "${COMPOSE[@]}" --env-file "${ROOT_DIR}/.env.app" -f "${APP_COMPOSE}" ps
+    resolve_sizing_file_quiet "${ROOT_DIR}/.env.app"
+    "${COMPOSE[@]}" --env-file "${SIZING_ENV_FILE}" --env-file "${ROOT_DIR}/.env.app" -f "${APP_COMPOSE}" ps
   fi
 }
 
@@ -73,7 +75,8 @@ cmd_logs() {
 
   [[ -f "${env_file}" ]] || die "Missing ${env_file}. Run init-${target} first."
 
-  local args=(--env-file "${env_file}" -f "${compose_file}" logs -f --tail=100)
+  resolve_sizing_file_quiet "${env_file}"
+  local args=(--env-file "${SIZING_ENV_FILE}" --env-file "${env_file}" -f "${compose_file}" logs -f --tail=100)
   if [[ -n "${service}" ]]; then
     args+=("${service}")
   fi
@@ -87,7 +90,8 @@ cmd_down() {
 
   if [[ "${target}" == "app" || "${target}" == "all" ]] && [[ -f "${ROOT_DIR}/.env.app" ]]; then
     log "Stopping application stack..."
-    local -a app_args=(--env-file "${ROOT_DIR}/.env.app" -f "${APP_COMPOSE}")
+    resolve_sizing_file_quiet "${ROOT_DIR}/.env.app"
+    local -a app_args=(--env-file "${SIZING_ENV_FILE}" --env-file "${ROOT_DIR}/.env.app" -f "${APP_COMPOSE}")
     set -a
     # shellcheck disable=SC1090
     source "${ROOT_DIR}/.env.app"
@@ -100,7 +104,8 @@ cmd_down() {
 
   if [[ "${target}" == "storage" || "${target}" == "all" ]] && [[ -f "${ROOT_DIR}/.env.storage" ]]; then
     log "Stopping storage stack..."
-    "${COMPOSE[@]}" --env-file "${ROOT_DIR}/.env.storage" -f "${STORAGE_COMPOSE}" down
+    resolve_sizing_file_quiet "${ROOT_DIR}/.env.storage"
+    "${COMPOSE[@]}" --env-file "${SIZING_ENV_FILE}" --env-file "${ROOT_DIR}/.env.storage" -f "${STORAGE_COMPOSE}" down
   fi
 
   ok "Down complete (${target})."

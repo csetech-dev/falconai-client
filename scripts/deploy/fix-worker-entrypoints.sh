@@ -16,7 +16,14 @@ cd "${ROOT_DIR}"
 
 bash "${SCRIPT_DIR}/init-client-data.sh"
 
-COMPOSE_ARGS=(--env-file "${ENV_FILE}" -f "${APP_COMPOSE}" -f "${ROOT_DIR}/docker-compose.ghcr.yml")
+# This script force-recreates the four heaviest scraper containers, so it must
+# resolve the exact same env layering as deploy-app.sh — otherwise it would
+# silently rebuild them at the compose-file (test-sized) defaults.
+load_env_file "${ENV_FILE}"
+resolve_deploy_env
+write_deploy_runtime_env_file "${ENV_FILE}"
+USE_GHCR=1
+app_compose_args
 
 WORKERS=(worker-fb worker-x worker-linkedin web-worker)
 

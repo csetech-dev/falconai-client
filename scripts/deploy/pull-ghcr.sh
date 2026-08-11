@@ -28,9 +28,11 @@ cd "${ROOT_DIR}"
 ENV_ARGS=()
 if [[ -f "${ENV_FILE}" ]]; then
   write_deploy_runtime_env_file "${ENV_FILE}"
-  ENV_ARGS=(--env-file "${ENV_FILE}" --env-file "${ROOT_DIR}/.env.app.runtime")
   load_env_file "${ENV_FILE}"
   resolve_deploy_env
+  # Sizing profile first so .env.app can override any single knob.
+  resolve_sizing_file
+  ENV_ARGS=(--env-file "${SIZING_ENV_FILE}" --env-file "${ENV_FILE}" --env-file "${ROOT_DIR}/.env.app.runtime")
 fi
 
 [[ -n "${GHCR_IMAGE_PREFIX:-}" ]] || die "GHCR_IMAGE_PREFIX is not set (e.g. ghcr.io/your-org/falconai)"

@@ -61,10 +61,7 @@ MINIO_PORT="${MINIO_ENDPOINT##*:}"
 if [[ "${USE_GHCR}" == "1" ]]; then
   [[ -n "${GHCR_IMAGE_PREFIX:-}" ]] || die "GHCR mode requires GHCR_IMAGE_PREFIX in .env.app"
 fi
-COMPOSE_ARGS=(--env-file "${ENV_FILE}" --env-file "${ROOT_DIR}/.env.app.runtime" -f "${APP_COMPOSE}")
-if [[ "${USE_GHCR}" == "1" ]]; then
-  COMPOSE_ARGS+=(-f "${ROOT_DIR}/docker-compose.ghcr.yml")
-fi
+app_compose_args
 
 if wireguard_enabled; then
   # Storage is reached over the encrypted tunnel. Verify the config exists, then

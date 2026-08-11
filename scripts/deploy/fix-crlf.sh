@@ -24,7 +24,8 @@ while IFS= read -r -d '' file; do
   strip_file "${file}" && fixed=$((fixed + 1)) || true
 done < <(find "${ROOT_DIR}/scripts" -type f -name '*.sh' -print0)
 
-for file in Makefile .env.app .env.storage .env.app.example .env.storage.example; do
+for file in Makefile .env.app .env.storage .env.app.example .env.storage.example \
+            .env.sizing.test .env.sizing.prod; do
   strip_file "${ROOT_DIR}/${file}" && fixed=$((fixed + 1)) || true
 done
 

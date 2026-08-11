@@ -16,7 +16,14 @@ KC_ADMIN_PASS="${KEYCLOAK_ADMIN_PASSWORD:-admin}"
 KC_RELATIVE_PATH="${KEYCLOAK_HTTP_RELATIVE_PATH:-/}"
 REALM_FILE="${ROOT_DIR}/infra/keycloak/realm-falcon.json"
 REALM_FALLBACK="${ROOT_DIR}/scripts/realm-falcon.json"
+# Sizing profile must be in scope or Compose warns about every unset FALCON_SZ_*.
+# This script does not source scripts/deploy/common.sh, so resolve it inline.
+SIZING_PROFILE="$(sed -n 's/^[[:space:]]*FALCON_SIZING_PROFILE[[:space:]]*=[[:space:]]*//p' "${ROOT_DIR}/.env.app" 2>/dev/null | tr -d '"'\''[:space:]' | tail -1)"
+SIZING_ENV_FILE="${ROOT_DIR}/.env.sizing.${SIZING_PROFILE:-test}"
 COMPOSE_ARGS=(--env-file "${ROOT_DIR}/.env.app" -f "${ROOT_DIR}/docker-compose.app.yml")
+if [[ -f "${SIZING_ENV_FILE}" ]]; then
+  COMPOSE_ARGS=(--env-file "${SIZING_ENV_FILE}" "${COMPOSE_ARGS[@]}")
+fi
 if [[ -f "${ROOT_DIR}/docker-compose.ghcr.yml" ]]; then
   COMPOSE_ARGS+=(-f "${ROOT_DIR}/docker-compose.ghcr.yml")
 fi

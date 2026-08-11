@@ -35,10 +35,10 @@ services:
     deploy:
       resources:
         limits:
-          memory: 1G
-          cpus: '1'
+          memory: "${FALCON_SZ_MINIO_MEM:-1G}"
+          cpus: "${FALCON_SZ_MINIO_CPU:-1}"
         reservations:
-          memory: 256M
+          memory: "${FALCON_SZ_MINIO_MEM_RES:-256M}"
           cpus: '0.25'
     logging:
       driver: json-file
@@ -72,14 +72,19 @@ services:
     deploy:
       resources:
         limits:
-          memory: 2G
-          cpus: '2'
+          memory: "${FALCON_SZ_PG_MEM:-4G}"
+          cpus: "${FALCON_SZ_PG_CPU:-2}"
         reservations:
-          memory: 512M
+          memory: "${FALCON_SZ_PG_MEM_RES:-512M}"
           cpus: '0.5'
-    command: 'postgres -c max_connections=200 -c shared_buffers=512MB -c effective_cache_size=1536MB
-      -c work_mem=16MB -c maintenance_work_mem=128MB -c random_page_cost=1.1 -c effective_io_concurrency=200
-      -c wal_buffers=16MB -c max_wal_size=2GB -c checkpoint_completion_target=0.9
+    # Sized by the deploy profile (.env.sizing.*). Keep work_mem x max_connections
+    # comfortably inside FALCON_SZ_PG_MEM — it is a per-sort-node budget, not a
+    # per-connection one, so a complex query can allocate several multiples of it.
+    command: 'postgres -c max_connections=${FALCON_SZ_PG_MAX_CONN:-150} -c shared_buffers=${FALCON_SZ_PG_SHARED_BUFFERS:-1GB}
+      -c effective_cache_size=${FALCON_SZ_PG_CACHE:-3GB} -c work_mem=${FALCON_SZ_PG_WORK_MEM:-8MB}
+      -c maintenance_work_mem=${FALCON_SZ_PG_MAINT_WORK_MEM:-256MB} -c random_page_cost=1.1
+      -c effective_io_concurrency=${FALCON_SZ_PG_IO_CONCURRENCY:-200} -c wal_buffers=16MB
+      -c max_wal_size=${FALCON_SZ_PG_MAX_WAL_SIZE:-2GB} -c checkpoint_completion_target=0.9
 
       '
     networks:

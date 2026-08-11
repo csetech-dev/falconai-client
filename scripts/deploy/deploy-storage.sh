@@ -33,14 +33,16 @@ else
   warn "Set WIREGUARD_ENABLED=true (or remove it) to encrypt the app<->storage link."
 fi
 
+storage_compose_args
+
 log "Pulling storage images..."
-"${COMPOSE[@]}" --env-file "${ENV_FILE}" -f "${STORAGE_COMPOSE}" pull
+"${COMPOSE[@]}" "${COMPOSE_ARGS[@]}" pull
 
 log "Starting storage stack..."
-"${COMPOSE[@]}" --env-file "${ENV_FILE}" -f "${STORAGE_COMPOSE}" up -d
+"${COMPOSE[@]}" "${COMPOSE_ARGS[@]}" up -d
 
-wait_for_compose_healthy "${ENV_FILE}" "${STORAGE_COMPOSE}" "postgres" 180
-wait_for_compose_healthy "${ENV_FILE}" "${STORAGE_COMPOSE}" "minio" 120
+wait_for_compose_healthy "postgres" 180
+wait_for_compose_healthy "minio" 120
 
 prune_docker_artifacts 0
 
