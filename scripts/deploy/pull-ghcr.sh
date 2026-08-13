@@ -53,7 +53,29 @@ log "Starting stack (--no-build)..."
 # shellcheck disable=SC2086
 "${COMPOSE[@]}" "${ENV_ARGS[@]}" ${COMPOSE_FILES} -f "${ROOT_DIR}/docker-compose.ghcr.yml" up -d --no-build --remove-orphans
 
-if docker ps --format '{{.Names}}' | grep -qx "${PRISMA_CONTAINER}"; then
+# Wait for container to be ready before running prisma db push
+wait_for_container() {
+  local container="$1"
+  local max_attempts="${2:-30}"
+  local wait_seconds="${3:-2}"
+  local attempt=1
+
+  log "Waiting for container ${container} to be ready..."
+  while [ $attempt -le $max_attempts ]; do
+    if docker exec "$container" echo "ready" >/dev/null 2>&1; then
+      log "Container ${container} is ready (attempt ${attempt}/${max_attempts})"
+      return 0
+    fi
+    log "Container ${container} not ready, waiting... (attempt ${attempt}/${max_attempts})"
+    sleep "$wait_seconds"
+    attempt=$((attempt + 1))
+  done
+
+  warn "Container ${container} did not become ready after ${max_attempts} attempts"
+  return 1
+}
+
+if wait_for_container "${PRISMA_CONTAINER}" 30 2; then
   log "Applying database schema from image (prisma db push --accept-data-loss)..."
   if docker exec -w "${PRISMA_WORKDIR}" "${PRISMA_CONTAINER}" npx prisma db push --skip-generate --accept-data-loss; then
     ok "Prisma schema applied."

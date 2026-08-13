@@ -86,8 +86,36 @@ compose_args() {
   printf '%s\n' "${args[@]}"
 }
 
+wait_for_container() {
+  local container="$1"
+  local max_attempts="${2:-30}"
+  local wait_seconds="${3:-2}"
+  local attempt=1
+
+  log "[PRISMA DB PUSH] Waiting for container ${container} to be ready..."
+  while [ $attempt -le $max_attempts ]; do
+    if docker exec "$container" echo "ready" >/dev/null 2>&1; then
+      log "[PRISMA DB PUSH] Container ${container} is ready (attempt ${attempt}/${max_attempts})"
+      return 0
+    fi
+    log "[PRISMA DB PUSH] Container ${container} not ready, waiting... (attempt ${attempt}/${max_attempts})"
+    sleep "$wait_seconds"
+    attempt=$((attempt + 1))
+  done
+
+  warn "[PRISMA DB PUSH] Container ${container} did not become ready after ${max_attempts} attempts"
+  return 1
+}
+
 run_prisma_db_push() {
   echo "" >> "$OUTPUT_FILE"
+
+  # Wait for falcon-core container to be ready before running prisma db push
+  if ! wait_for_container "falcon-core" 30 2; then
+    fail_deployment "falcon-core container not ready for prisma db push"
+    return 1
+  fi
+
   log "[PRISMA DB PUSH] Running prisma db push --skip-generate in falcon-core..."
   if docker exec -w /app/libs/database falcon-core npx prisma db push --skip-generate 2>&1 | tee -a "$OUTPUT_FILE"; then
     log "[PRISMA DB PUSH] prisma db push succeeded"
