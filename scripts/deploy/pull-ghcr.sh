@@ -54,8 +54,8 @@ log "Starting stack (--no-build)..."
 "${COMPOSE[@]}" "${ENV_ARGS[@]}" ${COMPOSE_FILES} -f "${ROOT_DIR}/docker-compose.ghcr.yml" up -d --no-build --remove-orphans
 
 if docker ps --format '{{.Names}}' | grep -qx "${PRISMA_CONTAINER}"; then
-  log "Applying database schema from image (prisma db push)..."
-  if docker exec -w "${PRISMA_WORKDIR}" "${PRISMA_CONTAINER}" npx prisma db push --skip-generate; then
+  log "Applying database schema from image (prisma db push --accept-data-loss)..."
+  if docker exec -w "${PRISMA_WORKDIR}" "${PRISMA_CONTAINER}" npx prisma db push --skip-generate --accept-data-loss; then
     ok "Prisma schema applied."
     bash "${ROOT_DIR}/scripts/deploy/backfill-news-origin.sh" || \
       warn "news origin backfill failed — falcon-core startup backfill will retry."

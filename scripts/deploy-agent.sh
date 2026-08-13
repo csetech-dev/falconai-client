@@ -107,6 +107,74 @@ run_news_origin_backfill() {
   fi
 }
 
+run_pcdn_sync() {
+  # Sync config bundle from pcdn before GHCR deploy.
+  # Requires PCDN_SYNC_ON_DEPLOY=true, PCDN_ENDPOINT, PCDN_PASSWORD in .env.app
+  local endpoint="${PCDN_ENDPOINT:-https://4sightdigi.com:8443}"
+  local project="${PCDN_PROJECT:-falconai-client}"
+  local password="${PCDN_PASSWORD:-}"
+
+  if [[ -z "$password" ]]; then
+    log "[PCDN SYNC] Skipped — PCDN_PASSWORD not set"
+    return 0
+  fi
+
+  echo "" >> "$OUTPUT_FILE"
+  log "[PCDN SYNC] Downloading config bundle from ${endpoint}/p/${project}/download ..."
+
+  local tmp_dir
+  tmp_dir="$(mktemp -d)"
+  local zip_file="${tmp_dir}/${project}.zip"
+
+  local http_code
+  http_code="$(curl -sS -X POST \
+    -H "X-PCDN-Password: ${password}" \
+    "${endpoint}/p/${project}/download" \
+    -o "${zip_file}" \
+    -w "%{http_code}" \
+    --connect-timeout 30 \
+    --max-time 120 2>&1)" || {
+    log "[PCDN SYNC] curl failed: $http_code"
+    rm -rf "$tmp_dir"
+    return 1
+  }
+
+  if [[ "$http_code" != "200" ]]; then
+    log "[PCDN SYNC] Failed: HTTP $http_code (wrong password or server error)"
+    rm -rf "$tmp_dir"
+    return 1
+  fi
+
+  # Preserve local env files — bundle may contain templates that would overwrite secrets
+  local env_backup="${tmp_dir}/env_backup"
+  mkdir -p "$env_backup"
+  for env_file in .env.app .env.storage .env; do
+    if [[ -f "${PROJECT_DIR}/${env_file}" ]]; then
+      cp "${PROJECT_DIR}/${env_file}" "${env_backup}/${env_file}"
+      log "[PCDN SYNC] Backed up ${env_file}"
+    fi
+  done
+
+  log "[PCDN SYNC] Download OK, extracting to ${PROJECT_DIR} ..."
+  if ! unzip -o "${zip_file}" -d "${PROJECT_DIR}" 2>&1 | tee -a "$OUTPUT_FILE"; then
+    log "[PCDN SYNC] unzip failed"
+    rm -rf "$tmp_dir"
+    return 1
+  fi
+
+  # Restore preserved env files
+  for env_file in .env.app .env.storage .env; do
+    if [[ -f "${env_backup}/${env_file}" ]]; then
+      cp "${env_backup}/${env_file}" "${PROJECT_DIR}/${env_file}"
+      log "[PCDN SYNC] Restored ${env_file}"
+    fi
+  done
+
+  rm -rf "$tmp_dir"
+  log "[PCDN SYNC] Config bundle synced successfully"
+  return 0
+}
+
 ensure_deploy_dir() {
   mkdir -p "$DEPLOY_DIR"
 }
@@ -114,6 +182,11 @@ ensure_deploy_dir() {
 log() {
   ensure_deploy_dir
   echo "$*" | tee -a "$OUTPUT_FILE"
+}
+
+warn() {
+  ensure_deploy_dir
+  echo "[WARN] $*" | tee -a "$OUTPUT_FILE"
 }
 
 fail_deployment() {
@@ -177,6 +250,21 @@ run_deployment() {
       fail_deployment "GHCR_IMAGE_PREFIX not set in .env.app or environment"
       return 1
     }
+
+    # Optional: sync config bundle from pcdn before pulling images
+    if [[ "${PCDN_SYNC_ON_DEPLOY:-}" == "true" ]]; then
+      if ! run_pcdn_sync; then
+        fail_deployment "pcdn sync failed"
+        return 1
+      fi
+      # Re-source .env.app in case pcdn updated it
+      if [[ -f "$PROJECT_DIR/.env.app" ]]; then
+        set -a
+        # shellcheck disable=SC1090
+        source "$PROJECT_DIR/.env.app"
+        set +a
+      fi
+    fi
 
     export FALCON_DEPLOY_MODE=ghcr
     export FALCON_DEPLOY_DIR="${FALCON_DEPLOY_DIR:-$PROJECT_DIR}"

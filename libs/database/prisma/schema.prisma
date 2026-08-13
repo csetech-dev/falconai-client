@@ -2908,6 +2908,11 @@ model VideoSegment {
   redFlagSeverity RedFlagSeverity? @map("red_flag_severity")
   redFlagReason   String?          @db.Text @map("red_flag_reason")
 
+  // Speaker overlap detection
+  isOverlapped    Boolean          @default(false) @map("is_overlapped")
+  overlapSpeakers Json             @default("[]") @map("overlap_speakers")
+  overlapRatio    Float            @default(0.0) @map("overlap_ratio")
+
   // AI hybrid search content (BGE-M3, 1024 dimensions)
   searchTsv       Unsupported("tsvector")? @map("search_tsv")
   textEmbedding   Unsupported("vector(1024)")? @map("text_embedding")
