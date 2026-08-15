@@ -310,6 +310,7 @@ model User {
   reportBookmarks      ReportBookmark[]
   bookmarkCollections  BookmarkCollection[]
   twoFactor            UserTwoFactor?
+  chatThreads          ChatThread[]
 
   @@map("users")
 }
@@ -3667,4 +3668,55 @@ model WebhookDelivery {
   @@index([status, nextRetryAt], map: "webhook_delivery_status_retry_idx")
   @@index([endpointId], map: "webhook_delivery_endpoint_idx")
   @@map("webhook_deliveries")
+}
+
+// ============================================
+// AI CHAT — persisted conversation history
+// ============================================
+
+enum ChatThreadStatus {
+  ACTIVE
+  ARCHIVED
+}
+
+enum ChatMessageRole {
+  USER
+  ASSISTANT
+  SYSTEM
+}
+
+/// A conversation thread belonging to a single user. Created on first
+/// chat turn (or explicitly via POST /ai-chat/threads). The Python
+/// falcon-ai-service reads/writes these via asyncpg raw SQL; Prisma
+/// owns the DDL and the NestJS core-service manages thread CRUD with
+/// JWT-authenticated user isolation.
+model ChatThread {
+  id        String           @id @default(cuid())
+  userId    String
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title     String           @default("New Chat")
+  status    ChatThreadStatus @default(ACTIVE)
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @default(now()) @updatedAt
+
+  messages  ChatMessage[]
+
+  @@index([userId, updatedAt])
+  @@map("chat_threads")
+}
+
+/// Individual messages within a chat thread. The metadata JSONB column
+/// stores retrieval references, run IDs, provider/model info, and agent
+/// trace data emitted by the Python streaming pipeline.
+model ChatMessage {
+  id        String          @id @default(cuid())
+  threadId  String
+  thread    ChatThread      @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  role      ChatMessageRole
+  content   String          @db.Text
+  metadata  Json            @default("{}")
+  createdAt DateTime        @default(now())
+
+  @@index([threadId, createdAt])
+  @@map("chat_messages")
 }

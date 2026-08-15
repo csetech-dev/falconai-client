@@ -892,6 +892,7 @@ services:
     volumes:
     - worker_news_outputs:/app/outputs
     - ./apps/scrapers/worker-news/outputs:/app/outputs-host
+    # Bind mount persists Studio JSON; entrypoint chowns to appuser so Save works on Linux.
     - ./apps/scrapers/worker-news/studio_configs:/app/studio_configs
     depends_on:
       redis:
@@ -1085,7 +1086,17 @@ services:
       # Bounded so concurrent yt-dlp/ffmpeg downloads (which write to the RAM
       # tmpfs below) + the resident VNC Chrome (~1.7G) can't blow the memory cap
       # and trigger OOM SIGKILL of the download workers.
+      # Fallback concurrency — used only when multi-account is OFF or lane
+      # capacity can't be read. Under multi-account, concurrency is auto-derived
+      # to the live lane capacity (Σ per-account maxConcurrent), so throughput
+      # scales as accounts are added — no need to edit this.
       WORKER_CONCURRENCY: ${VIDEO_WORKER_CONCURRENCY:-2}
+      # Hard OOM guard on the auto-derived value: never run more than this many
+      # parallel downloads regardless of summed maxConcurrent.
+      WORKER_CONCURRENCY_MAX: "${WORKER_CONCURRENCY_MAX:-16}"
+      # When all lanes are busy (not "no lanes"), fail the job instead of
+      # downloading on the un-pinned legacy session. Off = best-effort fallback.
+      YT_STRICT_LANE: "${YT_STRICT_LANE:-false}"
       # Multi-account lanes require a SINGLE gunicorn worker as the lane owner (the
       # LaneManager semaphore + per-lane desktops live in one process); the
       # download consumer acquires lanes over loopback HTTP. Extra threads keep
