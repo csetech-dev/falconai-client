@@ -77,6 +77,9 @@ services:
   falcon-auth:
     <<: *ghcr-image
     image: ${GHCR_IMAGE_PREFIX}/falcon-auth:${FALCON_IMAGE_TAG:-latest}
+    environment:
+      REDIS_HOST: ${REDIS_HOST:-falcon-redis}
+      REDIS_PORT: ${REDIS_PORT:-6379}
 
   falcon-ai-py:
     <<: *ghcr-image

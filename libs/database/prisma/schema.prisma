@@ -281,6 +281,9 @@ model User {
   password        String?
   firstName       String?
   lastName        String?
+  avatarUrl       String?    // bare MinIO object key: avatars/<userId>/<uuid>.<ext>
+  designation     String?
+  employeeId      String?
   roles           UserRole[] @default([USER])
   isActive        Boolean    @default(true)
   phone           String?    // E.164, used by the SMS 2FA channel
@@ -311,8 +314,36 @@ model User {
   bookmarkCollections  BookmarkCollection[]
   twoFactor            UserTwoFactor?
   chatThreads          ChatThread[]
+  sessions             UserSession[]
 
   @@map("users")
+}
+
+/// One row per authenticated device/browser. Created at token issuance, rotated on
+/// refresh, revoked on logout / admin terminate. Like user_two_factor, falcon-auth
+/// owns the reads/writes via raw SQL on its TypeORM DataSource (it has no Prisma
+/// client), so this model must never be registered as a TypeORM entity.
+model UserSession {
+  id               String    @id // == the `sid` JWT claim; uuid supplied by falcon-auth
+  userId           String
+  refreshTokenHash String? // sha256 hex of the CURRENT refresh token
+  prevTokenHash    String? // sha256 of the previous token (rotation-race grace window)
+  prevRotatedAt    DateTime?
+  ipAddress        String?
+  userAgent        String?   @db.Text
+  deviceLabel      String? // "Chrome on Windows", derived from the UA at create time
+  createdAt        DateTime  @default(now())
+  lastSeenAt       DateTime  @default(now())
+  expiresAt        DateTime
+  revokedAt        DateTime?
+  revokedBy        String? // actor userId; null = self/system
+  revokedReason    String? // logout | admin_terminate | password_change | user_deactivated
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, revokedAt])
+  @@index([expiresAt])
+  @@map("user_sessions")
 }
 
 // 2FA enrollment state (Phase 1: TOTP). Kept in a separate 1:1 table so the
