@@ -955,6 +955,15 @@ services:
       X_MULTI_ACCOUNT_ENABLED: "true"
       CORE_SERVICE_URL: http://falcon-core:4000
       WORKER_API_PASSWORD: ${WORKER_API_PASSWORD:-85234569495721}
+      # MinIO — re-host downloaded tweet videos so the stored link survives X's
+      # expiring CDN URLs (parity with worker-fb's /reel/video download mode).
+      MINIO_ENDPOINT: ${MINIO_ENDPOINT}
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-minioadmin}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-minioadmin}
+      MINIO_BUCKET: imas
+      MINIO_USE_SSL: 'false'
+      MINIO_PUBLIC_ENDPOINT: ${MINIO_PUBLIC_ENDPOINT:-localhost:12004}
+      MINIO_PUBLIC_USE_SSL: 'false'
       X_LANE_PLATFORM: TWITTER
       X_LANE_NOVNC_URL_TEMPLATE: ${X_LANE_NOVNC_URL_TEMPLATE:-/viewer/x/lane/{port}/vnc.html?autoconnect=1&resize=scale&path=viewer/x/lane/{port}/websockify}
     command:

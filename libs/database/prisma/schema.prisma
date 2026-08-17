@@ -1133,6 +1133,8 @@ model KeywordCategory {
   @@index([type])
   @@index([reference])
   @@index([isVisible])
+  @@index([name(ops: raw("gin_trgm_ops"))], type: Gin, map: "keyword_categories_name_trgm_idx")
+  @@index([description(ops: raw("gin_trgm_ops"))], type: Gin, map: "keyword_categories_description_trgm_idx")
   @@map("keyword_categories")
 }
 
@@ -1237,6 +1239,9 @@ model Keyword {
   @@index([categoryId])
   @@index([status])
   @@index([keyword])
+  @@index([keyword(ops: raw("gin_trgm_ops"))], type: Gin, map: "keywords_keyword_trgm_idx")
+  @@index([description(ops: raw("gin_trgm_ops"))], type: Gin, map: "keywords_description_trgm_idx")
+  @@index([aliases], type: Gin, map: "keywords_aliases_gin_idx")
   @@map("keywords")
 }
 
@@ -1310,7 +1315,10 @@ model NewsSource {
   updatedAt        DateTime          @updatedAt
 
   @@index([name])
+  @@index([name(ops: raw("gin_trgm_ops"))], type: Gin, map: "news_sources_name_trgm_idx")
+  @@index([normalizedName(ops: raw("gin_trgm_ops"))], type: Gin, map: "news_sources_normalized_name_trgm_idx")
   @@index([officialWebsite])
+  @@index([officialWebsite(ops: raw("gin_trgm_ops"))], type: Gin, map: "news_sources_website_trgm_idx")
   @@index([sourceType])
   @@index([isBuiltFromStudio])
   @@index([isTop])
@@ -1346,6 +1354,8 @@ model NewsMedia {
 
   @@unique([userId, name])
   @@index([userId])
+  @@index([name(ops: raw("gin_trgm_ops"))], type: Gin, map: "news_media_name_trgm_idx")
+  @@index([description(ops: raw("gin_trgm_ops"))], type: Gin, map: "news_media_description_trgm_idx")
   @@index([sortOrder])
   @@index([isBottomTicker])
   @@map("news_media")
@@ -1431,6 +1441,7 @@ model NewsArticle {
   @@index([divisionId, sourceId, scrapedAt])
   @@index([districtId, sourceId, scrapedAt])
   @@index([isAlarmingIncident, isAcknowledged, divisionId])
+  @@index([title(ops: raw("gin_trgm_ops"))], type: Gin, map: "news_articles_title_trgm_idx")
   @@map("news_articles")
 }
 
