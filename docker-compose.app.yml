@@ -544,7 +544,7 @@ services:
     environment:
       PORT: 4010
       NODE_ENV: production
-      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@${POSTGRES_HOST}:${POSTGRES_PORT:-5432}/falcon_ai?schema=public&application_name=falcon-gateway
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@${POSTGRES_HOST}:${POSTGRES_PORT:-5432}/falcon_ai?schema=public&application_name=falcon-gateway&connection_limit=${GATEWAY_DB_CONNECTION_LIMIT:-10}&pool_timeout=${GATEWAY_DB_POOL_TIMEOUT:-20}&options=-c%20statement_timeout%3D${GATEWAY_DB_STATEMENT_TIMEOUT_MS:-15000}
       REDIS_HOST: falcon-redis
       REDIS_PORT: 6379
       REDIS_DB: 0
@@ -723,6 +723,10 @@ services:
         reservations:
           memory: "${FALCON_SZ_FB_MEM_RES:-1G}"
           cpus: "${FALCON_SZ_FB_CPU_RES:-1}"
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
     logging:
       driver: json-file
       options:
@@ -794,6 +798,10 @@ services:
         reservations:
           memory: "${FALCON_SZ_LI_MEM_RES:-384M}"
           cpus: "${FALCON_SZ_LI_CPU_RES:-0.25}"
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
     logging:
       driver: json-file
       options:
@@ -885,6 +893,14 @@ services:
       STUDIO_USE_PROXY: '1'
       FLARESOLVERR_URL: http://flaresolverr:8191
       FLARESOLVERR_ENABLED: 'true'
+      # MinIO — News Source Studio configs (studio-configs/news/*.json)
+      MINIO_ENDPOINT: ${MINIO_ENDPOINT:-falcon-minio:9000}
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-minioadmin}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-minioadmin}
+      MINIO_BUCKET: imas
+      MINIO_USE_SSL: 'false'
+      MINIO_PUBLIC_ENDPOINT: ${MINIO_PUBLIC_ENDPOINT:-localhost:12004}
+      MINIO_PUBLIC_USE_SSL: 'false'
     # Chromium launches with --disable-dev-shm-usage, so a large /dev/shm is wasted
     # reservation — and tmpfs pages are charged to this container's memory cgroup.
     shm_size: "${FALCON_SZ_NEWS_SHM:-1gb}"
@@ -898,10 +914,10 @@ services:
     volumes:
     - worker_news_outputs:/app/outputs
     - ./apps/scrapers/worker-news/outputs:/app/outputs-host
-    # Bind mount persists Studio JSON; entrypoint chowns to appuser so Save works on Linux.
-    - ./apps/scrapers/worker-news/studio_configs:/app/studio_configs
     depends_on:
       redis:
+        condition: service_started
+      minio:
         condition: service_started
       flaresolverr:
         condition: service_started
@@ -925,6 +941,10 @@ services:
         reservations:
           memory: "${FALCON_SZ_NEWS_MEM_RES:-512M}"
           cpus: "${FALCON_SZ_NEWS_CPU_RES:-1}"
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
     logging:
       driver: json-file
       options:
@@ -1002,6 +1022,10 @@ services:
         reservations:
           memory: "${FALCON_SZ_X_MEM_RES:-512M}"
           cpus: "${FALCON_SZ_X_CPU_RES:-0.5}"
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
     logging:
       driver: json-file
       options:
@@ -1056,6 +1080,10 @@ services:
         reservations:
           memory: "${FALCON_SZ_TG_MEM_RES:-128M}"
           cpus: "${FALCON_SZ_TG_CPU_RES:-0.25}"
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
     logging:
       driver: json-file
       options:
@@ -1165,6 +1193,10 @@ services:
         reservations:
           memory: "${FALCON_SZ_VIDEO_MEM_RES:-512M}"
           cpus: "${FALCON_SZ_VIDEO_CPU_RES:-0.25}"
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
     logging:
       driver: json-file
       options:

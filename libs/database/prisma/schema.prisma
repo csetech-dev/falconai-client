@@ -1363,8 +1363,8 @@ model NewsMedia {
 
 model NewsArticle {
   id             String       @id @default(cuid())
-  scrapeResultId String       @unique
-  scrapeResult   ScrapeResult @relation(fields: [scrapeResultId], references: [id], onDelete: Cascade)
+  scrapeResultId String?      @unique
+  scrapeResult   ScrapeResult? @relation(fields: [scrapeResultId], references: [id], onDelete: Cascade)
   campaignId     String?
   campaign       Campaign?    @relation(fields: [campaignId], references: [id], onDelete: Cascade)
   mediaId        String?
@@ -1804,6 +1804,10 @@ model PostComment {
   // Profile-wide comment streams. scrapedAt is the incremental-sync key (never
   // null); postedAt is the chronological one.
   @@index([ownerCampaignId, scrapedAt])
+  // Post-scoped external comment stream (sortBy=scrapedAt). Created in
+  // production via sandbox/sql/core-index-post-comments-stream.sql
+  // (CONCURRENTLY); declared here so `db push` does not drop it.
+  @@index([postId, scrapedAt])
   @@index([ownerCampaignId, postedAt])
   @@map("post_comments")
 }
@@ -3268,6 +3272,133 @@ model UserAuditEvent {
   @@index([action, createdAt])
   @@index([createdAt])
   @@map("user_audit_events")
+}
+
+// ============================================
+// AI FEEDBACK CAPTURE
+//
+// Analysts correct AI-written analysis fields through the "refine with
+// AI, then save" loop (AiAnalysisRefineService + the
+// POST .../analysis/refine and PATCH .../analysis/field endpoints).
+// Before these tables existed the save overwrote the AI value in place,
+// so the AI original, the analyst's instruction, and the identity of
+// the editor were all destroyed on write — the highest-value training
+// signal in the product was discarded as a side effect of using it.
+//
+// Two tables, because a *rejected* suggestion is as informative as an
+// accepted one:
+//   - AiFieldRefinement → one row per refine call (what was asked, what
+//     the model proposed). Rows with appliedAt = null are suggestions
+//     the analyst chose not to keep.
+//   - AiFieldEdit       → one row per save (before → after, by whom),
+//     linked back to the refinement when the save followed one.
+//
+// Neither carries a hard FK to the analysed entity: entityKind spans
+// four different tables, and these rows must outlive re-analysis (which
+// deletes and recreates analysis rows) to stay useful as a corpus.
+// ============================================
+
+/// Entity families that expose refinable AI analysis fields. Values match
+/// AiAnalysisRefineService's entityKind: "post" | "article" | "profile" | "video".
+enum AiFieldEntityKind {
+  POST
+  ARTICLE
+  PROFILE
+  VIDEO
+}
+
+/// One AI refine invocation. Written before the model is called so a
+/// failed or abandoned refine is still visible, then completed with the
+/// proposal. `appliedAt`/`appliedEditId` are set only if the analyst
+/// went on to save the result.
+model AiFieldRefinement {
+  id String @id @default(cuid())
+
+  entityKind AiFieldEntityKind
+  /// Id of the post / article / profile / video being analysed.
+  entityId   String
+  /// Analysis field key, e.g. "summary", "mainThemes", "topicClusters".
+  field      String
+
+  /// The analyst's natural-language instruction. This is the single most
+  /// valuable label the system produces — it states, in words, what was
+  /// wrong with the model's output.
+  prompt String @db.Text
+
+  /// Field value at the moment the refine was requested (the AI original,
+  /// unless the field had already been edited). JSON because field types
+  /// vary: text, string[], and topic-cluster objects.
+  valueBefore Json?
+  /// What the model returned. Null if the call failed — see `error`.
+  aiProposed  Json?
+  /// Failure message when the refine did not produce a usable value.
+  error       String?
+
+  /// Provenance of the model that produced `aiProposed`, so a corpus can
+  /// be filtered by the model/prompt that generated it. Mirrors the
+  /// pattern already used by TrendingCategoryIntelligence.
+  modelProvider String?
+  modelName     String?
+  promptKind    String?
+
+  /// Null for anonymous / service actions. Not a hard FK on purpose.
+  actorId    String?
+  actorEmail String?
+
+  /// Set when a subsequent save persisted a value derived from this refine.
+  appliedAt     DateTime?
+  appliedEditId String?   @unique
+
+  createdAt DateTime @default(now())
+
+  appliedEdit AiFieldEdit? @relation(fields: [appliedEditId], references: [id], onDelete: SetNull)
+
+  @@index([entityKind, entityId, field])
+  @@index([actorId, createdAt])
+  @@index([appliedAt])
+  @@index([createdAt])
+  @@map("ai_field_refinements")
+}
+
+/// One persisted edit to an AI analysis field. `valueBefore` is what the
+/// row held immediately before the write, so (valueBefore → valueAfter)
+/// is a directly usable correction pair.
+model AiFieldEdit {
+  id String @id @default(cuid())
+
+  entityKind AiFieldEntityKind
+  entityId   String
+  field      String
+
+  valueBefore Json?
+  valueAfter  Json?
+
+  /// REFINE_SAVE  → the analyst saved (possibly after hand-editing) a value
+  ///                the model proposed; `refinement` is populated.
+  /// DIRECT_SAVE  → the analyst typed the value without asking the model.
+  source AiFieldEditSource @default(DIRECT_SAVE)
+
+  /// True when the saved value differs from what the model proposed —
+  /// i.e. the analyst accepted the suggestion only partially.
+  divergedFromProposal Boolean @default(false)
+
+  actorId    String?
+  actorEmail String?
+
+  createdAt DateTime @default(now())
+
+  refinement AiFieldRefinement?
+
+  @@index([entityKind, entityId, field, createdAt])
+  @@index([actorId, createdAt])
+  @@index([source, createdAt])
+  @@index([createdAt])
+  @@map("ai_field_edits")
+}
+
+enum AiFieldEditSource {
+  REFINE_SAVE
+  DIRECT_SAVE
 }
 
 // ============================================
