@@ -917,8 +917,6 @@ services:
     depends_on:
       redis:
         condition: service_started
-      minio:
-        condition: service_started
       flaresolverr:
         condition: service_started
     healthcheck:
