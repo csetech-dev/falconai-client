@@ -597,6 +597,11 @@ services:
       MINIO_CONSOLE_UPSTREAM: ${MINIO_CONSOLE_ENDPOINT:-falcon-minio:9001}
       AI_DASHBOARD_UPSTREAM: ${AI_DASHBOARD_ENDPOINT:-host.docker.internal:3010}
       AI_DASHBOARD_SCHEME: ${AI_DASHBOARD_PROTOCOL:-http}
+      # Falcon Brain lives on its own host: set BRAIN_ENDPOINT to
+      # <brain-host-ip>:12200 in .env.app. Until then /api/brain/ 502s, which is
+      # the intended behaviour rather than proxying somewhere unexpected.
+      BRAIN_UPSTREAM: ${BRAIN_ENDPOINT:-falcon-brain-gateway:4020}
+      BRAIN_SCHEME: ${BRAIN_PROTOCOL:-http}
     deploy:
       resources:
         limits:

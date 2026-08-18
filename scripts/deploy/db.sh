@@ -49,13 +49,11 @@ One-off container (falcon-core does NOT need to be running; uses .env.app):
   migrate           prisma migrate deploy
   status            prisma migrate status
   psql              psql client (args after --)
-  backfill-news-origin  fill news_articles.origin from legacy keyword category types
 
 Running falcon-core container (classic docker exec approach):
   copy-schema       docker cp schema.prisma into running falcon-core
   exec push         docker exec … prisma db push --skip-generate
   exec push-loss    docker exec … prisma db push --skip-generate --accept-data-loss
-  backfill-news-origin  run origin backfill SQL (legacy keyword category types)
   exec generate     docker exec … prisma generate
   exec seed         docker exec … full seed flow
   exec seed-prompts docker exec … npm run seed:prompts
@@ -228,13 +226,8 @@ main() {
   shift || true
 
   case "${command}" in
-    backfill-news-origin)
-      bash "${SCRIPT_DIR}/backfill-news-origin.sh"
-      ;;
     push)
       run_db_action oneoff push 0
-      bash "${SCRIPT_DIR}/backfill-news-origin.sh" || \
-        warn "news origin backfill failed — falcon-core startup backfill will retry."
       ;;
     push-loss)
       warn "push-loss may drop columns/tables — backup first if unsure."
@@ -267,8 +260,6 @@ main() {
       case "${sub}" in
         push)
           run_db_action exec push 0
-          bash "${SCRIPT_DIR}/backfill-news-origin.sh" || \
-            warn "news origin backfill failed — falcon-core startup backfill will retry."
           ;;
         push-loss)
           warn "exec push-loss may drop columns/tables — backup first if unsure."

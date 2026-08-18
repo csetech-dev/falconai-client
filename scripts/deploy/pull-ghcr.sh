@@ -79,8 +79,6 @@ if wait_for_container "${PRISMA_CONTAINER}" 30 2; then
   log "Applying database schema from image (prisma db push --accept-data-loss)..."
   if docker exec -w "${PRISMA_WORKDIR}" "${PRISMA_CONTAINER}" npx prisma db push --skip-generate --accept-data-loss; then
     ok "Prisma schema applied."
-    bash "${ROOT_DIR}/scripts/deploy/backfill-news-origin.sh" || \
-      warn "news origin backfill failed — falcon-core startup backfill will retry."
   else
     warn "prisma db push failed — check logs on ${PRISMA_CONTAINER}."
   fi
