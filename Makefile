@@ -1,4 +1,4 @@
-.PHONY: init-storage init-app init-brain deploy-storage deploy-app deploy-brain deploy-ghcr deploy-status deploy-down fix-crlf fix-worker-entrypoints verify-scrapers sizing-check clean-docker setup-auto-deploy logs-app logs-storage \
+.PHONY: init-storage init-app deploy-storage deploy-app deploy-ghcr deploy-status deploy-down fix-crlf fix-worker-entrypoints verify-scrapers sizing-check clean-docker setup-auto-deploy logs-app logs-storage \
 	db-push db-push-loss db-generate db-seed db-seed-prompts db-seed-news-prompts db-seed-news-sources db-seed-videos db-status db-psql \
 	db-exec-push db-exec-push-loss db-exec-generate db-exec-seed db-exec-seed-prompts db-exec-seed-news-prompts db-exec-seed-news-sources db-exec-seed-videos db-exec-seed-twitter-profiles db-exec-seed-telegram-profiles db-copy-schema \
 	dump-db help
@@ -19,10 +19,6 @@ help:
 	@echo "    make fix-crlf         Fix Windows CRLF in .env and shell scripts (Linux client)"
 	@echo "    make fix-worker-entrypoints  Fix worker-fb/worker-x python api.py crash (GHCR)"
 	@echo "    make verify-scrapers   Check all scraper containers are running"
-	@echo ""
-	@echo "  Falcon Brain stack (AI plane — separate host):"
-	@echo "    make init-brain       Create .env.brain"
-	@echo "    make deploy-brain     Start Brain stack (gateway; +GPU if BRAIN_GPU_ENABLED)"
 	@echo ""
 	@echo "  make deploy-status    Show running services"
 	@echo "  make deploy-down      Stop stacks"
@@ -70,13 +66,6 @@ deploy-storage:
 
 deploy-app:
 	bash scripts/deploy/deploy.sh app
-
-deploy-brain:
-	bash scripts/deploy/deploy-brain.sh
-
-init-brain:
-	@test -f .env.brain || cp .env.brain.example .env.brain
-	@echo ".env.brain ready — fill in BRAIN_SERVER_IP and BRAIN_INTERNAL_API_KEY"
 
 deploy-ghcr:
 	bash scripts/deploy/deploy.sh ghcr

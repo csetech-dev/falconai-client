@@ -1440,7 +1440,12 @@ model NewsArticle {
   @@index([districtId])
   @@index([divisionId, sourceId, scrapedAt])
   @@index([districtId, sourceId, scrapedAt])
-  @@index([isAlarmingIncident, isAcknowledged, divisionId])
+  @@index([status, mediaId, publishedAt])
+  @@index([status, sourceId, publishedAt])
+  @@index([status, keywordCategoryId, publishedAt])
+  @@index([status, divisionId, publishedAt])
+  @@index([status, districtId, publishedAt])
+  @@index([status, isAlarmingIncident, publishedAt])
   @@index([title(ops: raw("gin_trgm_ops"))], type: Gin, map: "news_articles_title_trgm_idx")
   @@map("news_articles")
 }
@@ -2395,11 +2400,14 @@ model NewsAIAnalysis {
   @@index([articleId])
   @@index([overallSentimentLabel])
   @@index([articleId, overallSentimentLabel])
+  @@index([articleId, lastAnalyzedAt(sort: Desc)])
   @@index([overallSentimentLabel, lastAnalyzedAt])
   @@index([relationFrom, relationTo])
   @@index([relationFrom])
   @@index([relationTo])
   @@index([relationFrom, relationTo, lastAnalyzedAt])
+  @@index([trendingKeywords], type: Gin, map: "news_ai_analysis_trendingKeywords_jsonb_gin_idx")
+  @@index([topTopics], type: Gin, map: "news_ai_analysis_topTopics_jsonb_gin_idx")
   @@map("news_ai_analysis")
 }
 
