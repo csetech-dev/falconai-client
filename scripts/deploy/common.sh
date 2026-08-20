@@ -5,6 +5,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 STORAGE_COMPOSE="${ROOT_DIR}/docker-compose.storage.yml"
 APP_COMPOSE="${ROOT_DIR}/docker-compose.app.yml"
+BRAIN_COMPOSE="${ROOT_DIR}/docker-compose.brain.yml"
 
 # shellcheck disable=SC2034
 RED='\033[0;31m'
@@ -152,6 +153,31 @@ storage_compose_args() {
     --env-file "${ENV_FILE}"
     -f "${STORAGE_COMPOSE}"
   )
+}
+
+# Assemble the docker compose args for the BRAIN (AI plane) stack.
+# Requires ENV_FILE. Sets COMPOSE_ARGS.
+#
+# GPU services sit behind the `gpu` compose profile so the gateway can be
+# deployed and verified before any hardware exists. BRAIN_GPU_ENABLED=true in
+# .env.brain turns them on; anything else leaves them out entirely.
+brain_compose_args() {
+  resolve_sizing_file
+  COMPOSE_ARGS=(
+    --env-file "${SIZING_ENV_FILE}"
+    --env-file "${ENV_FILE}"
+    -f "${BRAIN_COMPOSE}"
+  )
+  # Image-only overlay, once the Brain images are published. Guarded so the
+  # source-build path keeps working before that overlay exists.
+  if [[ "${USE_GHCR:-0}" == "1" && -f "${ROOT_DIR}/docker-compose.brain.ghcr.yml" ]]; then
+    COMPOSE_ARGS+=(-f "${ROOT_DIR}/docker-compose.brain.ghcr.yml")
+  fi
+}
+
+# Whether the Brain stack should start its GPU serving containers.
+brain_gpu_enabled() {
+  [[ "$(printf '%s' "${BRAIN_GPU_ENABLED:-false}" | tr '[:upper:]' '[:lower:]')" == "true" ]]
 }
 
 is_docker_interface() {

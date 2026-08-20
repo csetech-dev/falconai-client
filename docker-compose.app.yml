@@ -209,8 +209,15 @@ services:
       REDIS_PORT: 6379
       AUTH_SESSION_CACHE_TTL_S: ${AUTH_SESSION_CACHE_TTL_S:-30}
       AUTH_REQUIRE_SID: ${AUTH_REQUIRE_SID:-false}
-      EXTERNAL_AI_API_URL: http://203.190.12.139:8000
-      EXTERNAL_AI_API_KEY: imas-ak-0c13d6d2c818ce16a4c1298b2998a9fb01096e7e48c151bbcd88a6d330640c10
+      # Endpoint keeps its previous value as a default so existing deploys are
+      # unaffected; it is not a secret, only an address.
+      EXTERNAL_AI_API_URL: ${EXTERNAL_AI_API_URL:-http://203.190.12.139:8000}
+      # NO DEFAULT — a credential must never be committed. The previous literal
+      # was live in git history and must be treated as compromised: rotate it,
+      # then set the new value in .env.app. Unset means no Authorization header
+      # is sent, which fails loudly at the upstream rather than silently
+      # authenticating with a leaked key.
+      EXTERNAL_AI_API_KEY: ${EXTERNAL_AI_API_KEY:-}
       VIDEO_AI_API_URL: ${VIDEO_AI_API_URL:-}
       CORE_API_BASE_URL: ${PUBLIC_GATEWAY_URL}/api/core
       WEBHOOK_BASE_URL: ${PUBLIC_GATEWAY_URL}/api/core/ai-analysis
@@ -597,6 +604,11 @@ services:
       MINIO_CONSOLE_UPSTREAM: ${MINIO_CONSOLE_ENDPOINT:-falcon-minio:9001}
       AI_DASHBOARD_UPSTREAM: ${AI_DASHBOARD_ENDPOINT:-host.docker.internal:3010}
       AI_DASHBOARD_SCHEME: ${AI_DASHBOARD_PROTOCOL:-http}
+      # Falcon Brain lives on its own host: set BRAIN_ENDPOINT to
+      # <brain-host-ip>:12200 in .env.app. Until then /api/brain/ 502s, which is
+      # the intended behaviour rather than proxying somewhere unexpected.
+      BRAIN_UPSTREAM: ${BRAIN_ENDPOINT:-falcon-brain-gateway:4020}
+      BRAIN_SCHEME: ${BRAIN_PROTOCOL:-http}
     deploy:
       resources:
         limits:
@@ -837,8 +849,12 @@ services:
   worker-news:
     profiles: ["scrapers"]
     build:
-      context: ./apps/scrapers/worker-news
-      dockerfile: Dockerfile
+      # Root context so libs/bangla-text can be copied in — same arrangement as
+      # falcon-core with libs/shared-types and libs/database. .dockerignore keeps
+      # the context small. See the header of the Dockerfile for why the shared
+      # normalizer must not be vendored.
+      context: .
+      dockerfile: apps/scrapers/worker-news/Dockerfile
     container_name: worker-news
     restart: unless-stopped
     ports:
