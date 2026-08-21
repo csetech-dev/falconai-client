@@ -434,6 +434,9 @@ services:
       TOKENIZERS_PARALLELISM: 'true'
       PROXY_ROTATOR_URL: http://proxy-rotator:8888
       PROXY_ENABLED: 'true'
+      # Same Gemini navigation timeout as internal-ai — both scrape the same
+      # page and share the same throttled egress.
+      GEMINI_NAVIGATION_TIMEOUT_MS: ${GEMINI_NAVIGATION_TIMEOUT_MS:-180000}
     healthcheck:
       interval: 30s
       timeout: 10s
@@ -1356,6 +1359,10 @@ services:
       INTERNAL_AI_RAW_NOVNC_URL: ${PUBLIC_GATEWAY_URL:-http://localhost:12006}/viewer/internal-ai/vnc/vnc.html?autoconnect=1&resize=scale&path=viewer/internal-ai/vnc/websockify
       PROXY_ROTATOR_URL: http://proxy-rotator:8888
       PROXY_ENABLED: 'true'
+      # Gemini page loads measured at ~113s through shared WARP egress (2026-08-20);
+      # the 60s default aborted every navigation. See the outage note in
+      # docs/brain/FALCON_BRAIN_TASKS.md above P1-9.
+      GEMINI_NAVIGATION_TIMEOUT_MS: ${GEMINI_NAVIGATION_TIMEOUT_MS:-180000}
     command:
     - sh
     - -lc
