@@ -1345,6 +1345,8 @@ model NewsSource {
   isTop             Boolean         @default(false) @map("is_top")
   isTodays          Boolean         @default(false) @map("is_todays")
   isTrending        Boolean         @default(false) @map("is_trending")
+  priorityOrder     Int?            @map("priority_order")
+  priorityFor       String?         @map("priority_for")
 
   articles   NewsArticle[]
   mediaLinks NewsMediaSource[]
@@ -1362,6 +1364,8 @@ model NewsSource {
   @@index([isTop])
   @@index([isTodays])
   @@index([isTrending])
+  @@index([priorityOrder])
+  @@index([priorityFor])
   @@map("news_sources")
 }
 
@@ -4350,4 +4354,54 @@ model ChatMessage {
 
   @@index([threadId, createdAt])
   @@map("chat_messages")
+}
+
+/// Registry of external outbound-messaging providers configured from the
+/// Technical Panel. Each row becomes a selectable channel/tile in the shared
+/// "Send" modal (alongside the built-in WhatsApp channel). Sending POSTs the
+/// edited item (title/content/url) to `endpointUrl` using `authToken`, shaping
+/// the request body from `bodyTemplate`. Companion to the "partners fetch FROM
+/// us" gateway integration — this is the "we push TO partners" direction.
+model MessagingProvider {
+  id          String   @id @default(cuid())
+  name        String
+  slug        String   @unique
+  endpointUrl String
+  httpMethod  String   @default("POST")
+  authType    String   @default("BEARER")
+  authToken   String?
+  headers     Json?
+  /// Field mapping / static body. Placeholders $title, $content, $url are
+  /// substituted at send time; any other value is passed through verbatim.
+  bodyTemplate Json?
+  enabled     Boolean  @default(true)
+  iconEmoji   String?
+  createdBy   String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  sendLogs    MessagingSendLog[]
+
+  @@map("messaging_providers")
+}
+
+/// Audit log of every send to an external messaging provider. Captures the
+/// reference ID and HTTP status the provider returns on save, so the send can
+/// be tracked and later correlated with provider-side updates (webhook style).
+model MessagingSendLog {
+  id           String            @id @default(cuid())
+  providerId   String
+  provider     MessagingProvider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  title        String?
+  ok           Boolean
+  status       Int?
+  referenceId  String?
+  error        String?
+  requestBody  Json?
+  responseBody Json?
+  sentBy       String?
+  createdAt    DateTime          @default(now())
+
+  @@index([providerId, createdAt])
+  @@map("messaging_send_logs")
 }
