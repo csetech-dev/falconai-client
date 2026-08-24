@@ -1478,6 +1478,15 @@ model NewsArticle {
 
   sourceWebsite       String
   author              String?
+  /// Byline -> monitored profile link. Soft reference to `Campaign.id`, no FK,
+  /// mirroring `VideoSpeaker.identityCampaignId`. Set per article and only by an
+  /// analyst: verifying one story never links the same name on other articles,
+  /// and ingest does not inherit it. Bylines are too weak an identifier to
+  /// generalise from — desk labels like "নিজস্ব প্রতিবেদক" are reused by ~38
+  /// sources, and namesakes recur within one source.
+  authorCampaignId    String?   @map("author_campaign_id")
+  authorVerifiedAt    DateTime? @map("author_verified_at")
+  authorVerifiedBy    String?   @map("author_verified_by")
   title               String?
   url                 String?
   /// Scrape provenance, e.g. /news/top_news or seed-news-media-group:print-media
@@ -1538,6 +1547,11 @@ model NewsArticle {
   @@index([sourceId])
   @@index([sourceId, scrapedAt])
   @@index([sourceId, publishedAt])
+  @@index([authorCampaignId])
+  // No index on ([sourceId, author]): scrapers occasionally dump article body
+  // into `author` (268 rows exceed 200 chars, one is 18 KB), which overflows the
+  // btree tuple limit and makes CREATE INDEX fail outright. Nothing looks
+  // articles up by byline anyway — links are read and written by article id.
   @@index([keywordCategoryId])
   @@index([keywordCategoryId, scrapedAt])
   @@index([keywordCategoryId, publishedAt])
