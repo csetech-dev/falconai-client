@@ -210,11 +210,22 @@ enum KeywordCategoryType {
   TOP_NEWS
 }
 
+/// Who/what created a keywords row — MANUAL from the Manage Media Keywords
+/// page (NewsManageCenterModal.tsx -> POST /api/core/keywords[/bulk]),
+/// AI_GENERATED from AI news analysis (linkNewsArticleAiKeywords in
+/// news-ai-keyword-link.util.ts). Distinct from KeywordCategoryType, which
+/// classifies the parent category, not the individual keyword row.
+enum KeywordType {
+  MANUAL
+  AI_GENERATED
+}
+
 enum KeywordCategoryReference {
   no_assigned
   is_politics
   is_international_trade
   is_economics
+  is_international_foreign
 }
 
 enum GroupTargetType {
@@ -1242,6 +1253,8 @@ model Keyword {
   keyword String
   color   String        @default("#06b6d4") // Hex color for visual identification
   status  KeywordStatus @default(ACTIVE)
+  /// MANUAL (Manage Media Keywords page) vs AI_GENERATED (AI news analysis).
+  type    KeywordType   @default(MANUAL)
 
   // Category relationship
   categoryId String
@@ -1253,6 +1266,15 @@ model Keyword {
 
   description String?  @db.Text
   aliases     String[] // Alternative terms/variations
+  /// Sub-grouping tag within a single category — introduced so the
+  /// international-foreign keyword set could collapse from 10 separate
+  /// categories (politics, india_relations, china_pakistan, security,
+  /// rohingya, economy, defence, human_rights, energy, diplomacy) into ONE
+  /// `is_international_foreign` category, with this field distinguishing
+  /// them instead. The India scheduler selects topicTag = "india_relations";
+  /// the general international scheduler selects everything else. Null for
+  /// keywords outside this scheme.
+  topicTag String?
 
   // Tracking metrics
   matchCount  Int       @default(0) // How many times this keyword was matched
@@ -1275,11 +1297,40 @@ model Keyword {
   @@index([userId])
   @@index([categoryId])
   @@index([status])
+  @@index([type])
+  @@index([topicTag])
   @@index([keyword])
   @@index([keyword(ops: raw("gin_trgm_ops"))], type: Gin, map: "keywords_keyword_trgm_idx")
   @@index([description(ops: raw("gin_trgm_ops"))], type: Gin, map: "keywords_description_trgm_idx")
   @@index([aliases], type: Gin, map: "keywords_aliases_gin_idx")
   @@map("keywords")
+}
+
+/// One row per AI-provider batch call made by the keyword-automation loop
+/// (apps/core-service/src/keywords/keyword-automation.service.ts). The AI is
+/// given ~100 keyword id+text pairs from one category and asked to group
+/// near-duplicates with a canonical; this logs what was sent, what came
+/// back, and what got applied — read by the Technical Panel's Keyword
+/// Automation page for the live log view.
+model KeywordAutomationLog {
+  id           String   @id @default(cuid())
+  categoryId   String
+  categoryName String
+  batchIndex   Int
+  keywordIds   String[]
+  aiProvider   String?
+  rawResponse  String?  @db.Text
+  groupsFound  Int      @default(0)
+  rowsMerged   Int      @default(0)
+  linksRepointed Int    @default(0)
+  status       String // running | success | failed
+  error        String?  @db.Text
+  createdAt    DateTime @default(now())
+  finishedAt   DateTime?
+
+  @@index([categoryId])
+  @@index([createdAt])
+  @@map("keyword_automation_logs")
 }
 
 model CampaignKeyword {
@@ -1345,6 +1396,7 @@ model NewsSource {
   isTop             Boolean         @default(false) @map("is_top")
   isTodays          Boolean         @default(false) @map("is_todays")
   isTrending        Boolean         @default(false) @map("is_trending")
+  isIngestionEnabled Boolean        @default(true) @map("is_ingestion_enabled")
   priorityOrder     Int?            @map("priority_order")
   priorityFor       String?         @map("priority_for")
 
@@ -1364,6 +1416,7 @@ model NewsSource {
   @@index([isTop])
   @@index([isTodays])
   @@index([isTrending])
+  @@index([isIngestionEnabled])
   @@index([priorityOrder])
   @@index([priorityFor])
   @@map("news_sources")
@@ -1378,6 +1431,7 @@ enum NewsSourceType {
 // Group of news papers (Print Media)
 model NewsMedia {
   id             String  @id @default(cuid())
+  slug           String?
   name           String
   description    String? @db.Text
   color          String  @default("#06b6d4")
@@ -1395,7 +1449,9 @@ model NewsMedia {
   updatedAt DateTime @updatedAt
 
   @@unique([userId, name])
+  @@unique([userId, slug])
   @@index([userId])
+  @@index([slug])
   @@index([name(ops: raw("gin_trgm_ops"))], type: Gin, map: "news_media_name_trgm_idx")
   @@index([description(ops: raw("gin_trgm_ops"))], type: Gin, map: "news_media_description_trgm_idx")
   @@index([sortOrder])
@@ -3903,6 +3959,12 @@ model ReportCategoryPreset {
   order       Int       @default(0)
   isSystem    Boolean   @default(false)
   isDisabled  Boolean   @default(false)
+  /// Section-band colour, as #RRGGBB. NULL means "never chosen" and is
+  /// NOT a missing value: the row still renders a colour, derived from its
+  /// `key` (see reports/lib/taxonomy-color.ts). Keeping the unchosen state
+  /// distinct is what lets the admin UI offer a Reset, and what let this
+  /// column ship without backfilling every seeded row.
+  color       String?
   /// Soft-delete timestamp. NULL = active, non-NULL = archived. Reads
   /// from resolvers and block dialogs filter `deletedAt: null`; the
   /// row stays in place so historical reports that reference its key
@@ -3939,6 +4001,12 @@ model ReportCategory {
   order       Int       @default(0)
   isSystem    Boolean   @default(false)
   isDisabled  Boolean   @default(false)
+  /// Section-band colour, as #RRGGBB. NULL means "never chosen" and is
+  /// NOT a missing value: the row still renders a colour, derived from its
+  /// `key` (see reports/lib/taxonomy-color.ts). Keeping the unchosen state
+  /// distinct is what lets the admin UI offer a Reset, and what let this
+  /// column ship without backfilling every seeded row.
+  color       String?
   /// Soft-delete timestamp — see ReportCategoryPreset.deletedAt.
   /// Cascade-on-delete from the parent preset: soft-deleting a preset
   /// stamps `deletedAt` on every child category in the same
@@ -3970,6 +4038,12 @@ model ReportTopicGroup {
   order       Int       @default(0)
   isSystem    Boolean   @default(false)
   isDisabled  Boolean   @default(false)
+  /// Section-band colour, as #RRGGBB. NULL means "never chosen" and is
+  /// NOT a missing value: the row still renders a colour, derived from its
+  /// `key` (see reports/lib/taxonomy-color.ts). Keeping the unchosen state
+  /// distinct is what lets the admin UI offer a Reset, and what let this
+  /// column ship without backfilling every seeded row.
+  color       String?
   /// Soft-delete timestamp — see ReportCategoryPreset.deletedAt.
   deletedAt   DateTime?
   createdAt   DateTime  @default(now())
@@ -4024,6 +4098,12 @@ model ReportSourceGroup {
   campaignIds String[]  @default([])
   isSystem    Boolean   @default(false)
   isDisabled  Boolean   @default(false)
+  /// Section-band colour, as #RRGGBB. NULL means "never chosen" and is
+  /// NOT a missing value: the row still renders a colour, derived from its
+  /// `key` (see reports/lib/taxonomy-color.ts). Keeping the unchosen state
+  /// distinct is what lets the admin UI offer a Reset, and what let this
+  /// column ship without backfilling every seeded row.
+  color       String?
   /// Soft-delete timestamp — see ReportCategoryPreset.deletedAt.
   deletedAt   DateTime?
   createdAt   DateTime  @default(now())
@@ -4376,6 +4456,19 @@ model MessagingProvider {
   bodyTemplate Json?
   enabled     Boolean  @default(true)
   iconEmoji   String?
+  /// Optional: endpoint that returns the provider-side user list, so operators
+  /// can pick specific recipients in the Send modal. All nullable — a provider
+  /// without these simply offers no user picker.
+  listUsersUrl   String?
+  userListPath   String?   // dot-path to the users array in the response, e.g. "data.users"
+  userIdField    String?   // field on each user used as the recipient id (default "id")
+  userLabelField String?   // field on each user shown to the operator (default "name")
+  /// Free-form bag for settings that don't fit the webhook-shaped columns
+  /// above — e.g. Obekhkhon's OAuth2/PKCE { ssoUrl, realm, clientId }. Keeps
+  /// this table usable for provider types beyond "POST a bearer-token
+  /// webhook" without a new column (or table) per type.
+  extraConfig Json?
+  updatedBy   String?
   createdBy   String?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
@@ -4393,6 +4486,7 @@ model MessagingSendLog {
   providerId   String
   provider     MessagingProvider @relation(fields: [providerId], references: [id], onDelete: Cascade)
   title        String?
+  recipient    String?
   ok           Boolean
   status       Int?
   referenceId  String?
@@ -4404,4 +4498,19 @@ model MessagingSendLog {
 
   @@index([providerId, createdAt])
   @@map("messaging_send_logs")
+}
+
+/// Saved WhatsApp recipients, managed in the Technical Panel. They appear as a
+/// searchable, selectable list under the WhatsApp channel in the Send modal —
+/// mirroring the external-provider user picker.
+model WhatsAppRecipient {
+  id          String   @id @default(cuid())
+  name        String
+  phoneNumber String   @unique
+  enabled     Boolean  @default(true)
+  createdBy   String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("whatsapp_recipients")
 }
