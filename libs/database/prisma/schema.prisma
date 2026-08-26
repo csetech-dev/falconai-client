@@ -712,6 +712,14 @@ model ScrapeJob {
   errorCode    String?
   retryCount   Int     @default(0)
 
+  /// Consecutive failures of a RECURRING scrape. Incremented on each failed
+  /// run, reset to 0 on each success. Purely for UI visibility — it never
+  /// stops or throttles retries (a failed recurring job stays claimable and
+  /// re-fires at its next slot). Deliberately distinct from `retryCount`,
+  /// which is a monotone lifetime attempt counter owned by the snapshot/OCR
+  /// pipelines and gated on elsewhere (`>= 2` stops recovery).
+  consecutiveFailureCount Int @default(0)
+
   // Interval
   interval    Int? // Duration in seconds
   startedAt   DateTime?
@@ -1505,6 +1513,17 @@ model NewsArticle {
   // Set when an AI automation worker claims this row (status -> PROCESSING).
   // NewsArticle has no updatedAt, so this is what the stale-claim reaper uses.
   aiAnalysisClaimedAt DateTime?
+  /// Denormalized copy of this article's most recent NewsAIAnalysis row's
+  /// overallSentimentLabel — set at analysis-write time (news.service.ts's
+  /// analyzeArticle, technical-panel.service.ts's internal-AI webhook
+  /// handler). Exists purely so dashboard/analytics queries
+  /// (getDynamicAnalytics) can filter/aggregate sentiment with a plain
+  /// column read instead of a per-row `LEFT JOIN LATERAL` correlated
+  /// subquery into news_ai_analysis, which used to run once per matching
+  /// article (and once per article×keyword-link row in the keyword
+  /// aggregate) across 4 parallel queries — the dominant cost behind slow
+  /// topic/date-range searches at real data volumes.
+  latestSentimentLabel String?
 
   isAlarmingIncident Boolean   @default(false)
   isAcknowledged     Boolean   @default(false)
@@ -1567,6 +1586,13 @@ model NewsArticle {
   @@index([status, mediaId, publishedAt])
   @@index([status, sourceId, publishedAt])
   @@index([status, keywordCategoryId, publishedAt])
+  // Dashboard/news analytics (getDynamicAnalytics in news-dashboard.service.ts)
+  // filters on status + (mediaId OR sourceId) + keywordCategoryId + publishedAt
+  // simultaneously — a 3-predicate combo the single-dimension composites above
+  // don't cover (each is only status + ONE dimension + publishedAt), forcing a
+  // bitmap-AND of two indexes or a row-by-row recheck at scale.
+  @@index([status, mediaId, keywordCategoryId, publishedAt])
+  @@index([status, sourceId, keywordCategoryId, publishedAt])
   @@index([status, divisionId, publishedAt])
   @@index([status, districtId, publishedAt])
   @@index([status, isAlarmingIncident, publishedAt])
