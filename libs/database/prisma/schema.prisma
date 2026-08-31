@@ -2556,6 +2556,17 @@ model NewsAIAnalysis {
   keyFindings String[] @default([])
   alerts      Json? // [{type, message, severity}, ...]
 
+  // 9 Structured Analytical Dimensions (W5H2IF)
+  whatHappened      String?   @map("what_happened") @db.Text // কী ঘটেছে?
+  whenHappened      DateTime? @map("when_happened") // কখন ঘটেছিল?
+  whereHappened     String?   @map("where_happened") @db.VarChar(255) // কোথায় ঘটেছিল?
+  whoInvolved       String?   @map("who_involved") @db.Text // কারা জড়িত ছিল?
+  betweenWhom       String?   @map("between_whom") @db.Text // কার কার মধ্যে ঘটেছিল?
+  whyHappened       String?   @map("why_happened") @db.Text // কেন ঘটেছিল?
+  rootCause         String?   @map("root_cause") @db.Text // কারণ কী ছিল?
+  whatImpact        String?   @map("what_impact") @db.Text // এর প্রভাব কী?
+  futureImplication String?   @map("future_implication") @db.Text // ভবিষ্যৎ ইঙ্গিত কী?
+
   // Detailed Analysis
   detailedInsights String?  @db.Text // Comprehensive multi-paragraph analysis
   potentialBiases  String?  @db.Text // Detected biases in sources

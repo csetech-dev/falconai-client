@@ -936,6 +936,9 @@ services:
     volumes:
     - worker_news_outputs:/app/outputs
     - ./apps/scrapers/worker-news/outputs:/app/outputs-host
+    # VNC desktop's Chrome profile — named volume so logins/cookies/saved
+    # passwords survive container recreation instead of resetting on deploy.
+    - ./apps/scrapers/worker-news/news_vnc_profile:/app/news_vnc_profile
     depends_on:
       redis:
         condition: service_started
