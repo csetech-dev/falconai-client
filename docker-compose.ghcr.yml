@@ -70,6 +70,21 @@ services:
       # where the deploy-agent watches it. Kept as /opt/falconai-client so the
       # container path matches the host client-bundle dir (no /opt/FalconAI).
       DEPLOY_PROJECT_DIR: /opt/falconai-client
+      # --- Outbound messaging: OAuth2 partner connections ---
+      # Declared here as well as in the base file: `environment` maps MERGE
+      # across compose files (unlike the `!override` volumes above), so this is
+      # belt-and-braces — it guarantees the vars reach the GHCR container even
+      # if this service is ever composed without the base file.
+      #
+      # Both are optional — the feature self-configures on first start:
+      #   * key unset  -> derived deterministically from JWT_SECRET (stable
+      #     across restarts/replicas; set a dedicated key to decouple the two)
+      #   * origins unset -> falls back to PUBLIC_GATEWAY_URL, then CORS_ORIGIN
+      # The connection tables are likewise created by core-service on boot, so
+      # there is no manual DDL step.
+      MESSAGING_TOKEN_ENC_KEY: ${MESSAGING_TOKEN_ENC_KEY:-}
+      MESSAGING_OAUTH_ALLOWED_ORIGINS: ${MESSAGING_OAUTH_ALLOWED_ORIGINS:-}
+      PUBLIC_GATEWAY_URL: ${PUBLIC_GATEWAY_URL}
     volumes: !override
       - /var/run/docker.sock:/var/run/docker.sock
       - ${FALCON_DEPLOY_DIR:-.}:/opt/falconai-client

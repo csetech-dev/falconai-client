@@ -4525,8 +4525,96 @@ model MessagingProvider {
   updatedAt   DateTime @updatedAt
 
   sendLogs    MessagingSendLog[]
+  oauthConnection MessagingProviderConnection?
+  oauthStates     MessagingOAuthState[]
 
   @@map("messaging_providers")
+}
+
+/// Server-held OAuth2 connection for an OAUTH2_PKCE provider — ONE per
+/// provider, i.e. the platform connects once and every operator sends through
+/// that connection (a service-account style integration), rather than each
+/// browser holding its own short-lived session.
+///
+/// Why the tokens live here and not in the browser: a refresh token in
+/// localStorage is readable by any XSS, dies with the browser profile, can't be
+/// revoked centrally, and forces every user on every device to re-authorize.
+/// Holding it server-side also moves the actual send to a server-to-server
+/// call, which is not subject to browser CORS at all.
+///
+/// accessToken/refreshToken are AES-256-GCM envelopes (see oauth/token-crypto.ts),
+/// never plaintext — a DB dump must not yield a usable partner credential.
+model MessagingProviderConnection {
+  id         String            @id @default(cuid())
+  providerId String            @unique
+  provider   MessagingProvider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+
+  /// CONNECTED — usable. NEEDS_RECONNECT — refresh token rejected/expired, an
+  /// operator must click Connect again. DISCONNECTED — explicitly revoked.
+  status String @default("DISCONNECTED")
+
+  /// Encrypted envelopes, not raw tokens.
+  accessTokenEnc  String? @db.Text
+  refreshTokenEnc String? @db.Text
+
+  accessTokenExpiresAt  DateTime?
+  /// Keycloak's refresh token has its own (longer) lifetime; once it passes,
+  /// no silent recovery is possible and the connection needs a human.
+  refreshTokenExpiresAt DateTime?
+  scope                 String?
+
+  /// Identity on the PARTNER side that this connection authenticates as —
+  /// shown in the UI ("Connected as x@y") and recorded on every send.
+  subject           String?
+  username          String?
+
+  /// Single-flight refresh guard. A refresh rotates the refresh token, so two
+  /// concurrent refreshes would race and one would persist a token the IdP has
+  /// already invalidated. Claimed by compare-and-set on refreshLockToken.
+  refreshLockToken String?
+  refreshLockedAt  DateTime?
+
+  /// Operational forensics: who connected it, when it last refreshed, and why
+  /// the last refresh failed (surfaced in the panel instead of a bare error).
+  connectedBy      String?
+  connectedAt      DateTime?
+  lastRefreshAt    DateTime?
+  lastRefreshError String?
+  lastUsedAt       DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status])
+  @@map("messaging_provider_connections")
+}
+
+/// One in-flight authorization attempt (the OAuth2 `state` + PKCE
+/// `code_verifier`). Kept SERVER-side for the few minutes between "operator
+/// clicked Connect" and "browser came back with a code": the verifier is the
+/// proof that binds the redirect to this request, so keeping it out of the
+/// browser removes a whole class of interception. `state` doubles as CSRF
+/// protection — an unsolicited callback has no matching row.
+///
+/// Rows are single-use (consumedAt) and expire quickly; a sweep clears the
+/// leftovers from abandoned attempts.
+model MessagingOAuthState {
+  id           String            @id @default(cuid())
+  state        String            @unique
+  providerId   String
+  provider     MessagingProvider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  codeVerifier String
+  /// Pinned at authorize time and replayed verbatim at token exchange — the
+  /// IdP requires them to match exactly.
+  redirectUri  String
+  createdBy    String?
+  expiresAt    DateTime
+  consumedAt   DateTime?
+  createdAt    DateTime          @default(now())
+
+  @@index([providerId])
+  @@index([expiresAt])
+  @@map("messaging_oauth_states")
 }
 
 /// Audit log of every send to an external messaging provider. Captures the

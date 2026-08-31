@@ -221,6 +221,26 @@ services:
       VIDEO_AI_API_URL: ${VIDEO_AI_API_URL:-}
       CORE_API_BASE_URL: ${PUBLIC_GATEWAY_URL}/api/core
       WEBHOOK_BASE_URL: ${PUBLIC_GATEWAY_URL}/api/core/ai-analysis
+      # --- Outbound messaging: OAuth2 partner connections ---
+      # PUBLIC_GATEWAY_URL is interpolated above but was never passed INTO the
+      # container, so the partner-sign-in origin check had nothing to fall back
+      # to and every Connect click 400'd. Export it explicitly.
+      PUBLIC_GATEWAY_URL: ${PUBLIC_GATEWAY_URL}
+      # App origins allowed to complete a partner sign-in — guards against an
+      # authorization code being redirected to a host we don't control. The
+      # effective list is the UNION of this, PUBLIC_GATEWAY_URL and CORS_ORIGIN.
+      #
+      # Defaulted to the public hostnames operators actually browse, which are
+      # also the ones registered on the partner side. PUBLIC_GATEWAY_URL alone
+      # is not enough: on app1 it is the internal https://app1.csetech.diu.edu.bd,
+      # while the partner only accepts stage-mms / mmas — so a sign-in started
+      # from the public host would be rejected by our own check.
+      MESSAGING_OAUTH_ALLOWED_ORIGINS: ${MESSAGING_OAUTH_ALLOWED_ORIGINS:-https://stage-mms.4sightdigi.com,https://mmas.hawkeyeinfo.xyz}
+      # Encryption key for partner OAuth tokens at rest. Optional: when unset a
+      # STABLE key is derived from JWT_SECRET (never a random per-boot key, which
+      # would silently orphan every stored connection on restart). Set a
+      # dedicated key (openssl rand -base64 32) to decouple it from JWT_SECRET.
+      MESSAGING_TOKEN_ENC_KEY: ${MESSAGING_TOKEN_ENC_KEY:-}
       UV_THREADPOOL_SIZE: ${CORE_UV_THREADPOOL_SIZE:-16}
       NODE_OPTIONS: --max-old-space-size=${CORE_NODE_HEAP_MB:-2048}
       MINIO_ENDPOINT: ${MINIO_ENDPOINT}
@@ -867,6 +887,12 @@ services:
     - 12080:3012
     environment:
       PORT: 3012
+      DISPLAY: :99
+      NEWS_VNC_PROFILE_DIR: /app/news_vnc_profile
+      NEWS_CDP_HOST: 127.0.0.1
+      NEWS_CDP_PORT: 9333
+      NEWS_VIEWER_URL: ${NEWS_VIEWER_URL:-/viewer/worker-news/vnc/vnc.html?autoconnect=1&resize=scale&path=viewer/worker-news/vnc/websockify}
+      NEWS_RAW_NOVNC_URL: ${NEWS_RAW_NOVNC_URL:-/viewer/worker-news/vnc/vnc.html?autoconnect=1&resize=scale&path=viewer/worker-news/vnc/websockify}
       REDIS_HOST: falcon-redis
       REDIS_PORT: 6379
       NODE_ENV: production
