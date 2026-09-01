@@ -90,8 +90,8 @@ services:
       - ${FALCON_DEPLOY_DIR:-.}:/opt/falconai-client
 
   # Same image as falcon-core — the two planes differ only by SERVICE_ROLE,
-  # which the base compose file sets. Started only when COMPOSE_PROFILES
-  # includes `split`.
+  # which the base compose file sets. Part of the default topology; see the
+  # base file for what it runs and how to revert to one all-in-one container.
   falcon-core-automation:
     <<: *ghcr-image
     image: ${GHCR_IMAGE_PREFIX}/core-service:${FALCON_IMAGE_TAG:-latest}
@@ -139,14 +139,14 @@ services:
     image: ${GHCR_IMAGE_PREFIX}/worker-fb:${FALCON_IMAGE_TAG:-latest}
     environment:
       FB_MULTI_ACCOUNT_ENABLED: "true"
-      CORE_SERVICE_URL: http://falcon-core:4000
+      CORE_SERVICE_URL: ${CORE_INTERNAL_URL:-http://falcon-core-automation:4000}
 
   worker-linkedin:
     <<: [*ghcr-image, *worker-linkedin-command]
     image: ${GHCR_IMAGE_PREFIX}/worker-linkedin:${FALCON_IMAGE_TAG:-latest}
     environment:
       LINKEDIN_MULTI_ACCOUNT_ENABLED: "true"
-      CORE_SERVICE_URL: http://falcon-core:4000
+      CORE_SERVICE_URL: ${CORE_INTERNAL_URL:-http://falcon-core-automation:4000}
       LINKEDIN_LANE_PLATFORM: LINKEDIN
 
   worker-x:
@@ -154,7 +154,7 @@ services:
     image: ${GHCR_IMAGE_PREFIX}/worker-x:${FALCON_IMAGE_TAG:-latest}
     environment:
       X_MULTI_ACCOUNT_ENABLED: "true"
-      CORE_SERVICE_URL: http://falcon-core:4000
+      CORE_SERVICE_URL: ${CORE_INTERNAL_URL:-http://falcon-core-automation:4000}
       X_LANE_PLATFORM: TWITTER
 
   web-worker:
@@ -162,13 +162,13 @@ services:
     image: ${GHCR_IMAGE_PREFIX}/web-worker:${FALCON_IMAGE_TAG:-latest}
     environment:
       WEB_WORKER_MULTI_ACCOUNT_ENABLED: "true"
-      CORE_SERVICE_URL: http://falcon-core:4000
+      CORE_SERVICE_URL: ${CORE_INTERNAL_URL:-http://falcon-core-automation:4000}
       WEB_WORKER_LANE_PLATFORM: WEB_WORKER
 
   worker-news:
     <<: *worker-news-image
     environment:
-      CORE_SERVICE_URL: http://falcon-core:4000
+      CORE_SERVICE_URL: ${CORE_INTERNAL_URL:-http://falcon-core-automation:4000}
       WORKER_API_PASSWORD: ${WORKER_API_PASSWORD:-85234569495721}
       NEWS_BROWSER_TOTAL_SLOTS: ${NEWS_BROWSER_TOTAL_SLOTS:-6}
       NEWS_BROWSER_STUDIO_RESERVED: ${NEWS_BROWSER_STUDIO_RESERVED:-2}

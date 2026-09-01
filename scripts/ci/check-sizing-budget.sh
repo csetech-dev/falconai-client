@@ -91,54 +91,26 @@ for entry in "${BUDGETS[@]}"; do
   fi
 
   # `docker compose config` omits services whose profile is inactive, so the
-  # profile list has to be forced on here or the scrapers (and the core
-  # automation plane) would simply be invisible to the budget.
+  # profile list has to be forced on here or the scrapers would simply be
+  # invisible to the budget. (core's automation plane carries no profile — it
+  # is part of the default topology — so it is always counted.)
   base_profiles="$(sed -n 's/^[[:space:]]*COMPOSE_PROFILES[[:space:]]*=[[:space:]]*//p' \
     "${OVERLAY_ENV}" | tr -d '"'\''[:space:]' | tail -1)"
   base_profiles="${base_profiles:-scrapers}"
 
-  # core ships in two supported shapes, and BOTH have to fit the box:
-  #
-  #   all-in-one — one falcon-core carrying the API and every scheduler, queue
-  #                consumer and AI loop. Sized by FALCON_SZ_CORE_*.
-  #   split      — falcon-core (API only) + falcon-core-automation, which is
-  #                what the `split` profile starts. Sized by the api-plane
-  #                values plus FALCON_SZ_CORE_AUTO_*.
-  #
-  # Checking only the first would let the split blow the budget the day someone
-  # enables it; checking only a naive "both profiles on, core still at its
-  # all-in-one size" would measure a configuration nobody should ever run. So
-  # each shape is rendered and checked on its own, and the split render pulls
-  # the api-plane values from the FALCON_SZ_CORE_SPLIT_* / CORE_SPLIT_* keys in
-  # the sizing file — which is what makes those documented numbers actually
-  # verified rather than a comment nobody re-checks.
-  split_overrides="$(mktemp)"
-  sed -n 's/^FALCON_SZ_CORE_SPLIT_/FALCON_SZ_CORE_/p' "${sizing}" > "${split_overrides}"
-  sed -n 's/^CORE_SPLIT_/CORE_/p' "${sizing}" >> "${split_overrides}"
-
-  render() {
-    # $1 = comma-separated profiles, $2 = optional extra --env-file (last wins)
-    local extra=()
-    [[ -n "${2:-}" ]] && extra=(--env-file "$2")
-    COMPOSE_PROFILES="$1" docker compose \
-      --env-file "${sizing}" \
-      --env-file "${OVERLAY_ENV}" \
-      "${extra[@]}" \
-      -f "${ROOT_DIR}/docker-compose.app.yml" \
-      -f "${ROOT_DIR}/docker-compose.ghcr.yml" \
-      config --format json 2>/dev/null
-  }
-
-  for shape in all-in-one split; do
-    if [[ "${shape}" == "split" ]]; then
-      rendered="$(render "${base_profiles},split" "${split_overrides}")"
-    else
-      rendered="$(render "${base_profiles}")"
-    fi
+  # core is two containers, both sized from this file (FALCON_SZ_CORE_* for the
+  # api plane, FALCON_SZ_CORE_AUTO_* for the automation plane). Together they
+  # are the previous single-container budget, so this render is the whole story.
+  rendered="$(COMPOSE_PROFILES="${base_profiles}" docker compose \
+    --env-file "${sizing}" \
+    --env-file "${OVERLAY_ENV}" \
+    -f "${ROOT_DIR}/docker-compose.app.yml" \
+    -f "${ROOT_DIR}/docker-compose.ghcr.yml" \
+    config --format json 2>/dev/null)"
 
   # Also surfaces services that have no limits at all — an unbounded container
   # on the prod box can consume the whole 495 GB.
-  if ! MAX_MEM="${max_mem}" MAX_SHM="${max_shm}" PROFILE="${profile}/${shape}" \
+  if ! MAX_MEM="${max_mem}" MAX_SHM="${max_shm}" PROFILE="${profile}" \
        "${PYTHON}" -c '
 import json, os, sys
 
@@ -160,7 +132,7 @@ gib = 1024 ** 3
 mem_g, shm_g = mem / gib, shm / gib
 max_mem, max_shm = float(os.environ["MAX_MEM"]), float(os.environ["MAX_SHM"])
 
-print("%-16s services=%-3d mem=%6.1f GiB (max %.0f)  cpus=%6.1f  shm=%5.1f GiB (max %.0f)"
+print("%-5s services=%-3d mem=%6.1f GiB (max %.0f)  cpus=%6.1f  shm=%5.1f GiB (max %.0f)"
       % (profile, len(data["services"]), mem_g, max_mem, cpu, shm_g, max_shm))
 
 ok = True
@@ -179,11 +151,8 @@ if unbounded:
 
 sys.exit(0 if ok else 1)
 ' <<<"${rendered}"; then
-      fail=1
-    fi
-  done
-
-  rm -f "${split_overrides}"
+    fail=1
+  fi
 done
 
 if (( fail )); then
