@@ -189,6 +189,9 @@ run_db_action() {
     seed-international-keywords)
       shell_cmd="cd ${DB_DIR} && node dist/prisma/seed-international-keywords.js"
       ;;
+    seed-international-news-source)
+      shell_cmd="cd ${DB_DIR} && npm run seed:international-news-source"
+      ;;
     seed-geo)
       shell_cmd="cd ${DB_DIR} && node dist/prisma/seed-geo.js"
       ;;
@@ -243,7 +246,7 @@ main() {
     generate)
       run_db_action oneoff generate
       ;;
-    seed|seed-prompts|seed-news-prompts|seed-news-sources|seed-news-status|seed-news-media|seed-keyword-categories-type|seed-international-keywords|seed-geo|seed-videos)
+    seed|seed-prompts|seed-news-prompts|seed-news-sources|seed-news-status|seed-news-media|seed-keyword-categories-type|seed-international-keywords|seed-international-news-source|seed-geo|seed-videos)
       run_db_action oneoff "${command}"
       ;;
     seed-twitter-profiles)
