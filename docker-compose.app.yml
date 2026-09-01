@@ -969,6 +969,16 @@ services:
       dockerfile: apps/scrapers/worker-news/Dockerfile
     container_name: worker-news
     restart: unless-stopped
+    # VNC desktop ONLY — no google-chrome in this shell. Chrome is launched by
+    # routes/vnc_desktop.py `_launch_chrome()` as an argv list; see the comment
+    # on the Dockerfile CMD for the two failures that rule out. Must stay
+    # byte-identical to that CMD and to the `command:` in docker-compose.yml /
+    # docker-compose.ghcr.yml (enforced by
+    # apps/scrapers/worker-news/tests/test_dockerfile_cmd.py).
+    command:
+    - sh
+    - -lc
+    - 'rm -f /tmp/.X99-lock /tmp/.X11-unix/X99; mkdir -p ${NEWS_VNC_PROFILE_DIR:-/app/news_vnc_profile}; Xvfb :99 -screen 0 1280x800x16 -ac >/tmp/xvfb.log 2>&1 & while [ ! -S /tmp/.X11-unix/X99 ]; do sleep 0.2; done; export DISPLAY=:99; if command -v xset >/dev/null 2>&1; then xset s off -dpms s noblank; fi; openbox >/tmp/openbox.log 2>&1 & x11vnc -display :99 -forever -shared -nopw -noxdamage -xkb -repeat -defer 10 -listen 0.0.0.0 -rfbport 5900 >/tmp/x11vnc.log 2>&1 & websockify --web=/usr/share/novnc/ 7900 localhost:5900 >/tmp/websockify.log 2>&1 & exec gunicorn -c gunicorn_conf.py --bind 0.0.0.0:${PORT} --workers ${WORKERS} --threads ${THREADS} --timeout ${GUNICORN_TIMEOUT} --graceful-timeout ${GUNICORN_GRACEFUL_TIMEOUT} --max-requests ${GUNICORN_MAX_REQUESTS} --max-requests-jitter ${GUNICORN_MAX_REQUESTS_JITTER} app:app'
     ports:
     - 12080:3012
     environment:
@@ -1062,9 +1072,13 @@ services:
       - curl
       - -fsS
       - http://localhost:3012/healthz
+      # Liveness only — /healthz never touches Xvfb or CDP. Browser/desktop
+      # readiness lives at GET /auth/readyz (verify-scrapers.sh probes it).
+      # 10s/3 matches the other workers; the old 30s/10 gave a wedged container
+      # ~5 minutes of looking healthy.
       interval: 30s
-      timeout: 30s
-      retries: 10
+      timeout: 10s
+      retries: 3
       start_period: 30s
     deploy:
       resources:

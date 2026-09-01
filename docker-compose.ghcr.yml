@@ -25,6 +25,22 @@ x-worker-news-image: &worker-news-image
   image: ${GHCR_IMAGE_PREFIX:?Set GHCR_IMAGE_PREFIX in .env}/worker-news:${FALCON_IMAGE_TAG:-latest}
 
 # GHCR images ship .pyc only — must not use `python api.py` / `python app.py`.
+#
+# worker-news: VNC desktop ONLY — no google-chrome here. Chrome is launched by
+# routes/vnc_desktop.py `_launch_chrome()` as an argv list, because every value
+# in this string is shell-parsed (an unquoted `--proxy-bypass-list=...,<-loopback>`
+# was read as a redirection and stopped Chrome from ever starting) and because
+# this shell's argv would otherwise contain "google-chrome", making any
+# `pkill -f google-chrome` kill the supervisor and the container with it.
+# Must stay byte-identical to apps/scrapers/worker-news/Dockerfile's CMD and to
+# the `command:` in docker-compose.yml / docker-compose.app.yml — enforced by
+# apps/scrapers/worker-news/tests/test_dockerfile_cmd.py.
+x-worker-news-command: &worker-news-command
+  command:
+    - sh
+    - -lc
+    - 'rm -f /tmp/.X99-lock /tmp/.X11-unix/X99; mkdir -p ${NEWS_VNC_PROFILE_DIR:-/app/news_vnc_profile}; Xvfb :99 -screen 0 1280x800x16 -ac >/tmp/xvfb.log 2>&1 & while [ ! -S /tmp/.X11-unix/X99 ]; do sleep 0.2; done; export DISPLAY=:99; if command -v xset >/dev/null 2>&1; then xset s off -dpms s noblank; fi; openbox >/tmp/openbox.log 2>&1 & x11vnc -display :99 -forever -shared -nopw -noxdamage -xkb -repeat -defer 10 -listen 0.0.0.0 -rfbport 5900 >/tmp/x11vnc.log 2>&1 & websockify --web=/usr/share/novnc/ 7900 localhost:5900 >/tmp/websockify.log 2>&1 & exec gunicorn -c gunicorn_conf.py --bind 0.0.0.0:${PORT} --workers ${WORKERS} --threads ${THREADS} --timeout ${GUNICORN_TIMEOUT} --graceful-timeout ${GUNICORN_GRACEFUL_TIMEOUT} --max-requests ${GUNICORN_MAX_REQUESTS} --max-requests-jitter ${GUNICORN_MAX_REQUESTS_JITTER} app:app'
+
 x-worker-fb-command: &worker-fb-command
   command:
     - sh
@@ -166,7 +182,7 @@ services:
       WEB_WORKER_LANE_PLATFORM: WEB_WORKER
 
   worker-news:
-    <<: *worker-news-image
+    <<: [*worker-news-image, *worker-news-command]
     environment:
       CORE_SERVICE_URL: ${CORE_INTERNAL_URL:-http://falcon-core-automation:4000}
       WORKER_API_PASSWORD: ${WORKER_API_PASSWORD:-85234569495721}
