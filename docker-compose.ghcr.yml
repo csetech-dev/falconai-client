@@ -39,7 +39,9 @@ x-worker-news-command: &worker-news-command
   command:
     - sh
     - -lc
-    - 'rm -f /tmp/.X99-lock /tmp/.X11-unix/X99; mkdir -p ${NEWS_VNC_PROFILE_DIR:-/app/news_vnc_profile}; Xvfb :99 -screen 0 1280x800x16 -ac >/tmp/xvfb.log 2>&1 & while [ ! -S /tmp/.X11-unix/X99 ]; do sleep 0.2; done; export DISPLAY=:99; if command -v xset >/dev/null 2>&1; then xset s off -dpms s noblank; fi; openbox >/tmp/openbox.log 2>&1 & x11vnc -display :99 -forever -shared -nopw -noxdamage -xkb -repeat -defer 10 -listen 0.0.0.0 -rfbport 5900 >/tmp/x11vnc.log 2>&1 & websockify --web=/usr/share/novnc/ 7900 localhost:5900 >/tmp/websockify.log 2>&1 & exec gunicorn -c gunicorn_conf.py --bind 0.0.0.0:${PORT} --workers ${WORKERS} --threads ${THREADS} --timeout ${GUNICORN_TIMEOUT} --graceful-timeout ${GUNICORN_GRACEFUL_TIMEOUT} --max-requests ${GUNICORN_MAX_REQUESTS} --max-requests-jitter ${GUNICORN_MAX_REQUESTS_JITTER} app:app'
+    # $$ escapes Compose's own interpolation so a literal $ reaches the
+    # container's shell (see the matching note in docker-compose.app.yml).
+    - 'rm -f /tmp/.X99-lock /tmp/.X11-unix/X99; mkdir -p $${NEWS_VNC_PROFILE_DIR:-/app/news_vnc_profile}; Xvfb :99 -screen 0 1280x800x16 -ac >/tmp/xvfb.log 2>&1 & while [ ! -S /tmp/.X11-unix/X99 ]; do sleep 0.2; done; export DISPLAY=:99; if command -v xset >/dev/null 2>&1; then xset s off -dpms s noblank; fi; openbox >/tmp/openbox.log 2>&1 & x11vnc -display :99 -forever -shared -nopw -noxdamage -xkb -repeat -defer 10 -listen 0.0.0.0 -rfbport 5900 >/tmp/x11vnc.log 2>&1 & websockify --web=/usr/share/novnc/ 7900 localhost:5900 >/tmp/websockify.log 2>&1 & exec gunicorn -c gunicorn_conf.py --bind 0.0.0.0:$${PORT} --workers $${WORKERS} --threads $${THREADS} --timeout $${GUNICORN_TIMEOUT} --graceful-timeout $${GUNICORN_GRACEFUL_TIMEOUT} --max-requests $${GUNICORN_MAX_REQUESTS} --max-requests-jitter $${GUNICORN_MAX_REQUESTS_JITTER} app:app'
 
 x-worker-fb-command: &worker-fb-command
   command:
