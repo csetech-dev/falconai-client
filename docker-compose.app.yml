@@ -1080,11 +1080,14 @@ services:
       - http://localhost:3012/healthz
       # Liveness only — /healthz never touches Xvfb or CDP. Browser/desktop
       # readiness lives at GET /auth/readyz (verify-scrapers.sh probes it).
-      # 10s/3 matches the other workers; the old 30s/10 gave a wedged container
-      # ~5 minutes of looking healthy.
+      # The generous timeout/retries are deliberate: this worker imports ~130
+      # scraper modules plus feedparser/playwright at boot, and nothing in the
+      # stack acts on `unhealthy` anyway (no autoheal; `restart: unless-stopped`
+      # does not restart on healthcheck failure), so tightening these only
+      # produces false red — it does not recover anything.
       interval: 30s
-      timeout: 10s
-      retries: 3
+      timeout: 30s
+      retries: 10
       start_period: 30s
     deploy:
       resources:
