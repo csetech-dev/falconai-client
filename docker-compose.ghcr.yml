@@ -89,6 +89,20 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       - ${FALCON_DEPLOY_DIR:-.}:/opt/falconai-client
 
+  # Same image as falcon-core — the two planes differ only by SERVICE_ROLE,
+  # which the base compose file sets. Started only when COMPOSE_PROFILES
+  # includes `split`.
+  falcon-core-automation:
+    <<: *ghcr-image
+    image: ${GHCR_IMAGE_PREFIX}/core-service:${FALCON_IMAGE_TAG:-latest}
+    environment:
+      # Same client-bundle deploy dir as falcon-core. This plane never writes
+      # a deploy trigger (that is a panel action, served by the api plane) and
+      # deliberately gets no docker.sock.
+      DEPLOY_PROJECT_DIR: /opt/falconai-client
+    volumes: !override
+      - ${FALCON_DEPLOY_DIR:-.}:/opt/falconai-client
+
   falcon-auth:
     <<: *ghcr-image
     image: ${GHCR_IMAGE_PREFIX}/falcon-auth:${FALCON_IMAGE_TAG:-latest}

@@ -150,7 +150,7 @@ services:
       COOLDOWN_SECONDS: '600'
       ASSIGNMENT_TIMEOUT: '1800'
       MAX_SHARED: '4'
-      CORE_SERVICE_URL: http://falcon-core:4000
+      CORE_SERVICE_URL: ${CORE_INTERNAL_URL:-http://falcon-core:4000}
     healthcheck:
       test:
       - CMD
@@ -199,7 +199,14 @@ services:
     restart: unless-stopped
     ports:
     - 12010:4000
-    environment:
+    environment: &core-env
+      # api | automation | all. Unset means "all", i.e. exactly the
+      # pre-split behaviour: this one container runs the dashboard API
+      # AND every scheduler, queue consumer and AI loop. Set it to `api`
+      # ONLY together with COMPOSE_PROFILES=...,split so the automation
+      # container below is actually started — `api` on its own silently
+      # stops all background work. GET /health reports which you have.
+      SERVICE_ROLE: ${CORE_SERVICE_ROLE:-all}
       PORT: 4000
       AUTH_SERVICE_URL: http://falcon-auth:3001/api/v1/auth
       NODE_ENV: production
@@ -314,6 +321,67 @@ services:
         reservations:
           memory: "${FALCON_SZ_CORE_MEM_RES:-256M}"
           cpus: "${FALCON_SZ_CORE_CPU_RES:-0.5}"
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '3'
+    networks:
+    - falcon-net
+  # The automation plane: same image, same environment, no HTTP for humans.
+  #
+  # It exists because core used to run ~20 scheduler timers, 9 BullMQ consumers
+  # (SocialProcessor alone at concurrency 24) and three AI automation loops on
+  # the SAME event loop that served the dashboard — so a scrape batch made the
+  # UI crawl. Node is single-threaded, so no amount of CPU quota fixed that;
+  # only a second process could.
+  #
+  # Opt-in: it only starts when COMPOSE_PROFILES includes `split`, and it is
+  # inert until falcon-core is switched to CORE_SERVICE_ROLE=api. Both planes
+  # share Postgres and Redis, and coordinate over a Redis bus.
+  falcon-core-automation:
+    profiles: ["split"]
+    build:
+      context: .
+      dockerfile: apps/core-service/Dockerfile
+    container_name: falcon-core-automation
+    restart: unless-stopped
+    ports:
+    - 12011:4000
+    environment:
+      <<: *core-env
+      SERVICE_ROLE: automation
+      # Its own heap and connection pool: this plane holds the big scrape
+      # payloads, the api plane mostly serializes query results.
+      NODE_OPTIONS: --max-old-space-size=${CORE_AUTO_NODE_HEAP_MB:-2048}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@${POSTGRES_HOST}:${POSTGRES_PORT:-5432}/falcon_ai?schema=public&connection_limit=${CORE_AUTO_DB_CONNECTION_LIMIT:-10}&pool_timeout=${CORE_DB_POOL_TIMEOUT:-20}&application_name=${CORE_AUTO_DB_APP_NAME:-falcon-core-automation}
+    depends_on:
+      redis:
+        condition: service_started
+      internal-ai:
+        condition: service_started
+      web-worker:
+        condition: service_started
+    volumes:
+    - /opt/FalconAI:/opt/FalconAI
+    healthcheck:
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+      test:
+      - CMD
+      - curl
+      - -f
+      - http://localhost:4000/api/v1/health
+    deploy:
+      resources:
+        limits:
+          memory: "${FALCON_SZ_CORE_AUTO_MEM:-2G}"
+          cpus: "${FALCON_SZ_CORE_AUTO_CPU:-2}"
+        reservations:
+          memory: "${FALCON_SZ_CORE_AUTO_MEM_RES:-256M}"
+          cpus: "${FALCON_SZ_CORE_AUTO_CPU_RES:-0.5}"
     logging:
       driver: json-file
       options:
@@ -635,6 +703,12 @@ services:
       # the intended behaviour rather than proxying somewhere unexpected.
       BRAIN_UPSTREAM: ${BRAIN_ENDPOINT:-falcon-brain-gateway:4020}
       BRAIN_SCHEME: ${BRAIN_PROTOCOL:-http}
+      # Where core's machine-facing traffic goes: worker ingest, AI webhooks and
+      # the once-a-second remote-lane polls. Defaults to falcon-core so nothing
+      # moves until you actually run the automation plane; set it to
+      # falcon-core-automation:4000 together with CORE_SERVICE_ROLE=api and
+      # COMPOSE_PROFILES=...,split.
+      CORE_AUTOMATION_UPSTREAM: ${CORE_AUTOMATION_ENDPOINT:-falcon-core:4000}
     deploy:
       resources:
         limits:
@@ -717,7 +791,7 @@ services:
       # Multi-account routing — per-lane VNC login + scrape
       FB_MULTI_ACCOUNT_ENABLED: "true"
       FB_REMOTE_EXTENSION_SCRAPING_ENABLED: "${FB_REMOTE_EXTENSION_SCRAPING_ENABLED:-true}"
-      CORE_SERVICE_URL: http://falcon-core:4000
+      CORE_SERVICE_URL: ${CORE_INTERNAL_URL:-http://falcon-core:4000}
       WORKER_API_PASSWORD: ${WORKER_API_PASSWORD:-85234569495721}
       FB_LANE_PLATFORM: FACEBOOK
       FB_METRICS_BROWSERLESS: ${FB_METRICS_BROWSERLESS:-true}
@@ -793,7 +867,7 @@ services:
       NODE_OPTIONS: --max-old-space-size=512
       # Multi-account routing — per-lane VNC login + scrape (same as worker-fb)
       LINKEDIN_MULTI_ACCOUNT_ENABLED: "true"
-      CORE_SERVICE_URL: http://falcon-core:4000
+      CORE_SERVICE_URL: ${CORE_INTERNAL_URL:-http://falcon-core:4000}
       WORKER_API_PASSWORD: ${WORKER_API_PASSWORD:-85234569495721}
       LINKEDIN_LANE_PLATFORM: LINKEDIN
       LINKEDIN_LANE_NOVNC_URL_TEMPLATE: ${LINKEDIN_LANE_NOVNC_URL_TEMPLATE:-/viewer/linkedin/lane/{port}/vnc.html?autoconnect=1&resize=scale&path=viewer/linkedin/lane/{port}/websockify}
@@ -898,7 +972,7 @@ services:
       NODE_ENV: production
       NODE_OPTIONS: --max-old-space-size=4096
       DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@${POSTGRES_HOST}:${POSTGRES_PORT:-5432}/falcon_ai?schema=public
-      CORE_SERVICE_URL: http://falcon-core:4000
+      CORE_SERVICE_URL: ${CORE_INTERNAL_URL:-http://falcon-core:4000}
       WORKER_API_PASSWORD: ${WORKER_API_PASSWORD:-85234569495721}
       WORKERS: ${NEWS_WORKERS:-2}
       THREADS: ${NEWS_THREADS:-2}
@@ -1022,7 +1096,7 @@ services:
       NODE_OPTIONS: --max-old-space-size=512
       # Multi-account routing — per-lane VNC login + scrape (same as worker-fb)
       X_MULTI_ACCOUNT_ENABLED: "true"
-      CORE_SERVICE_URL: http://falcon-core:4000
+      CORE_SERVICE_URL: ${CORE_INTERNAL_URL:-http://falcon-core:4000}
       WORKER_API_PASSWORD: ${WORKER_API_PASSWORD:-85234569495721}
       # MinIO — re-host downloaded tweet videos so the stored link survives X's
       # expiring CDN URLs (parity with worker-fb's /reel/video download mode).
@@ -1103,7 +1177,7 @@ services:
       TELEGRAM_API_HASH: ${TELEGRAM_API_HASH:-}
       TELEGRAM_PHONE: ${TELEGRAM_PHONE:-}
       TELEGRAM_PASSWORD: ${TELEGRAM_PASSWORD:-}
-      CORE_SERVICE_URL: http://falcon-core:4000
+      CORE_SERVICE_URL: ${CORE_INTERNAL_URL:-http://falcon-core:4000}
       WORKER_API_PASSWORD: ${WORKER_API_PASSWORD:-85234569495721}
     shm_size: "${FALCON_SZ_TG_SHM:-256mb}"
     volumes:
@@ -1204,7 +1278,7 @@ services:
       # noVNC is reached via the gateway at /viewer/youtube/lane/<7910+i>/*.
       YT_MULTI_ACCOUNT_ENABLED: "${YT_MULTI_ACCOUNT_ENABLED:-true}"
       WORKER_VIDEO_LANE_PLATFORM: YOUTUBE
-      CORE_SERVICE_URL: http://falcon-core:4000
+      CORE_SERVICE_URL: ${CORE_INTERNAL_URL:-http://falcon-core:4000}
       WORKER_API_PASSWORD: ${WORKER_API_PASSWORD:-85234569495721}
     shm_size: "${FALCON_SZ_VIDEO_SHM:-1gb}"
     volumes:
@@ -1267,7 +1341,7 @@ services:
       WEB_WORKER_RAW_NOVNC_URL: http://localhost:12110/vnc/vnc.html?autoconnect=1&resize=scale&path=vnc/websockify
       # Multi-account routing — per-lane VNC login + scrape (same as worker-fb)
       WEB_WORKER_MULTI_ACCOUNT_ENABLED: "true"
-      CORE_SERVICE_URL: http://falcon-core:4000
+      CORE_SERVICE_URL: ${CORE_INTERNAL_URL:-http://falcon-core:4000}
       WORKER_API_PASSWORD: ${WORKER_API_PASSWORD:-85234569495721}
       WEB_WORKER_LANE_PLATFORM: WEB_WORKER
       WEB_WORKER_LANE_NOVNC_URL_TEMPLATE: ${WEB_WORKER_LANE_NOVNC_URL_TEMPLATE:-/viewer/web-worker/lane/{port}/vnc.html?autoconnect=1&resize=scale&path=viewer/web-worker/lane/{port}/websockify}
