@@ -3,6 +3,11 @@ Description=FalconAI Deploy Agent (GHCR client)
 Documentation=https://github.com/falconai/falconai/blob/main/docs/GHCR_DEPLOY.md
 After=docker.service
 Requires=docker.service
+# Without a start limit, an unrunnable ExecStart (missing file, lost exec bit,
+# CRLF shebang -> status=203/EXEC) restarts every 5s forever and never surfaces
+# as failed. Five attempts in 5min, then stay in failed state.
+StartLimitIntervalSec=300
+StartLimitBurst=5
 
 [Service]
 Type=simple

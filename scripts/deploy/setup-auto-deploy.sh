@@ -76,6 +76,32 @@ if [[ "${DEPLOY_DIR}" != "/opt/falconai-client" ]]; then
   sed -i "s|/opt/falconai-client|${DEPLOY_DIR}|g" "${AGENT_UNIT}" "${WEBHOOK_UNIT}"
 fi
 
+# Fail here rather than leaving systemd to restart-loop on status=203/EXEC.
+# Checks the ExecStart target as written in the unit (after the path patch above).
+verify_unit_exec() {
+  local unit="$1" line target
+  local -a parts
+  line="$(sed -n 's|^ExecStart=||p' "${unit}" | head -1)"
+  [[ -n "${line}" ]] || die "No ExecStart in ${unit}"
+  # ExecStart may be "<interpreter> <script>" — check the script in that case.
+  read -r -a parts <<<"${line}"
+  target="${parts[0]}"
+  case "$(basename "${target}")" in
+    python*|env|bash|sh) target="${parts[1]:-${target}}" ;;
+  esac
+  [[ -f "${target}" ]] || die "ExecStart target missing: ${target} (referenced by ${unit})"
+  [[ -x "${target}" ]] || die "ExecStart target not executable: ${target} — chmod 755 it"
+  if head -1 "${target}" | grep -q $'\r'; then
+    die "ExecStart target has CRLF line endings: ${target} — run: sed -i 's/\\r\$//' ${target}"
+  fi
+  case "${target}" in
+    *.sh) bash -n "${target}" || die "Syntax error in ${target}" ;;
+  esac
+}
+
+verify_unit_exec "${AGENT_UNIT}"
+verify_unit_exec "${WEBHOOK_UNIT}"
+
 systemctl daemon-reload
 systemctl enable --now falcon-deploy-agent.service
 systemctl enable --now falcon-ghcr-webhook.service

@@ -3,6 +3,10 @@ Description=FalconAI GHCR deploy webhook
 Documentation=https://github.com/falconai/falconai/blob/main/docs/GHCR_DEPLOY.md
 After=network.target falcon-deploy-agent.service
 Wants=falcon-deploy-agent.service
+# See falcon-deploy-agent.service: cap restarts so an unrunnable ExecStart lands
+# in failed state instead of looping silently.
+StartLimitIntervalSec=300
+StartLimitBurst=5
 
 [Service]
 Type=simple
