@@ -4621,9 +4621,14 @@ model MessagingOAuthState {
 /// reference ID and HTTP status the provider returns on save, so the send can
 /// be tracked and later correlated with provider-side updates (webhook style).
 model MessagingSendLog {
-  id           String            @id @default(cuid())
-  providerId   String
-  provider     MessagingProvider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  id           String   @id @default(cuid())
+  /// Nullable: built-in channels (WhatsApp) have no MessagingProvider row, so
+  /// their sends log with providerId = null and are identified by `channel`.
+  providerId   String?
+  provider     MessagingProvider? @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  /// Channel discriminator so every send — provider or built-in — is groupable
+  /// from one column: a provider's slug (e.g. "obekhkhon") or "whatsapp".
+  channel      String?
   title        String?
   recipient    String?
   ok           Boolean
@@ -4633,9 +4638,10 @@ model MessagingSendLog {
   requestBody  Json?
   responseBody Json?
   sentBy       String?
-  createdAt    DateTime          @default(now())
+  createdAt    DateTime @default(now())
 
   @@index([providerId, createdAt])
+  @@index([channel, createdAt])
   @@map("messaging_send_logs")
 }
 

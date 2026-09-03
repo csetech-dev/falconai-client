@@ -995,6 +995,9 @@ services:
       NEWS_CDP_PORT: 9333
       NEWS_VIEWER_URL: ${NEWS_VIEWER_URL:-/viewer/worker-news/vnc/vnc.html?autoconnect=1&resize=scale&path=viewer/worker-news/vnc/websockify}
       NEWS_RAW_NOVNC_URL: ${NEWS_RAW_NOVNC_URL:-/viewer/worker-news/vnc/vnc.html?autoconnect=1&resize=scale&path=viewer/worker-news/vnc/websockify}
+      NEWS_LANE_PROFILE_ROOT: /app/lanes
+      NEWS_LANE_NOVNC_URL_TEMPLATE: ${NEWS_LANE_NOVNC_URL_TEMPLATE:-/viewer/worker-news/lane/{port}/vnc.html?autoconnect=1&resize=scale&path=viewer/worker-news/lane/{port}/websockify}
+      NEWS_LANE_AUTO_BROWSER: ${NEWS_LANE_AUTO_BROWSER:-true}
       REDIS_HOST: falcon-redis
       REDIS_PORT: 6379
       NODE_ENV: production
@@ -1067,6 +1070,7 @@ services:
     # VNC desktop's Chrome profile — named volume so logins/cookies/saved
     # passwords survive container recreation instead of resetting on deploy.
     - ./apps/scrapers/worker-news/news_vnc_profile:/app/news_vnc_profile
+    - ./apps/scrapers/worker-news/lanes:/app/lanes
     depends_on:
       redis:
         condition: service_started
