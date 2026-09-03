@@ -317,6 +317,7 @@ model User {
   reportTemplates      ReportTemplate[]
   reportVersions       ReportVersion[]      @relation("ReportVersionAuthor")
   reportCollaborations ReportCollaborator[]
+  teamMemberships      TeamMember[]
   notifications        UserNotification[]
   permissions          UserPermission[]
 
@@ -3330,6 +3331,12 @@ model Report {
   @@index([userId, status])
   @@index([templateId])
   @@index([deletedAt])
+  /// Covers the list query's usual shape: every list request pins `deletedAt`
+  /// (soft-delete), branches on `userId`, and sorts by `updatedAt desc` — that
+  /// sort was running unindexed on every page load, and the list's date filter
+  /// now ranges over the same column. Ordered so the equality predicates come
+  /// first and `updatedAt` serves both the range and the sort.
+  @@index([userId, deletedAt, updatedAt])
   @@map("reports")
 }
 
@@ -3365,11 +3372,55 @@ model ReportShareLink {
   /// Incremented each time the share link is successfully resolved.
   viewCount    Int                   @default(0)
   lastViewedAt DateTime?
+  /// Which team a TEAM-visibility link admits. Required in practice for
+  /// TEAM links — enforced in `ReportShareService`, not by the column, so a
+  /// PUBLIC link can leave it null.
+  teamId       String?
 
   report Report @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  team   Team?  @relation(fields: [teamId], references: [id], onDelete: Cascade)
 
   @@index([reportId])
+  /// Resolving "reports shared with a team I belong to" for the list.
+  @@index([teamId])
   @@map("report_share_links")
+}
+
+/// A named group of users. Exists so a TEAM-visibility share link can be
+/// checked against actual membership.
+///
+/// Before this, "TEAM" was enforced only as "the request carried some caller
+/// identity" — there was no team entity to check against, so any authenticated
+/// caller holding the URL satisfied it. That is not a team, it is a bearer
+/// token with a friendlier name.
+model Team {
+  id        String       @id @default(cuid())
+  name      String
+  createdBy String
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+
+  members    TeamMember[]
+  shareLinks ReportShareLink[]
+
+  @@map("teams")
+}
+
+model TeamMember {
+  id        String   @id @default(cuid())
+  teamId    String
+  userId    String
+  addedBy   String
+  createdAt DateTime @default(now())
+
+  team Team @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// One row per person per team; also backs the membership lookup.
+  @@unique([teamId, userId])
+  /// "which teams is this user in" runs on every list request.
+  @@index([userId])
+  @@map("team_members")
 }
 
 model ReportCollaborator {
