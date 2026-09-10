@@ -1163,6 +1163,12 @@ services:
       MINIO_PUBLIC_USE_SSL: 'false'
       X_LANE_PLATFORM: TWITTER
       X_LANE_NOVNC_URL_TEMPLATE: ${X_LANE_NOVNC_URL_TEMPLATE:-/viewer/x/lane/{port}/vnc.html?autoconnect=1&resize=scale&path=viewer/x/lane/{port}/websockify}
+      # Last-resort override for X's public web bearer. EMPTY by default: the
+      # worker harvests it from the live VNC Chrome and caches it process-wide.
+      # Set this only if that harvest is failing (log: "no X web bearer from any
+      # source"), which otherwise sends unauthenticated GraphQL and 403s every
+      # lane. Rotatable with `docker compose up -d worker-x` — no image rebuild.
+      X_WEB_BEARER: ${X_WEB_BEARER:-}
     command:
     - sh
     - -lc

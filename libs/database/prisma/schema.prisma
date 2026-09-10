@@ -3328,6 +3328,14 @@ model Report {
   /// blocks as the default date range when resolving live data.
   reportDateFrom      String?
   reportDateTo        String?
+  /// Persisted report-level hour band inside those dates (HH:mm), for
+  /// desks that publish more than once a day. NULL on both = the whole
+  /// day, which is how every report behaved before this existed. The
+  /// lower bound opens at the start of its minute and the upper one runs
+  /// through the end of its minute, so 09:00-09:59 is the nine-o'clock
+  /// hour — see apps/core-service/src/reports/lib/time-window.ts.
+  reportTimeFrom      String?
+  reportTimeTo        String?
   publishedAt         DateTime?
   /// Optional cron expression (e.g. "0 8 * * 0"). When set, a BullMQ
   /// repeatable job re-publishes the report on this schedule.
