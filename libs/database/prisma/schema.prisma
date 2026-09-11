@@ -226,6 +226,7 @@ enum KeywordCategoryReference {
   is_international_trade
   is_economics
   is_international_foreign
+  is_editorial
 }
 
 enum GroupTargetType {
@@ -1283,7 +1284,7 @@ model Keyword {
   /// them instead. The India scheduler selects topicTag = "india_relations";
   /// the general international scheduler selects everything else. Null for
   /// keywords outside this scheme.
-  topicTag String?
+  topicTag    String?
 
   // Tracking metrics
   matchCount  Int       @default(0) // How many times this keyword was matched
@@ -1322,20 +1323,20 @@ model Keyword {
 /// back, and what got applied — read by the Technical Panel's Keyword
 /// Automation page for the live log view.
 model KeywordAutomationLog {
-  id           String   @id @default(cuid())
-  categoryId   String
-  categoryName String
-  batchIndex   Int
-  keywordIds   String[]
-  aiProvider   String?
-  rawResponse  String?  @db.Text
-  groupsFound  Int      @default(0)
-  rowsMerged   Int      @default(0)
-  linksRepointed Int    @default(0)
-  status       String // running | success | failed
-  error        String?  @db.Text
-  createdAt    DateTime @default(now())
-  finishedAt   DateTime?
+  id             String    @id @default(cuid())
+  categoryId     String
+  categoryName   String
+  batchIndex     Int
+  keywordIds     String[]
+  aiProvider     String?
+  rawResponse    String?   @db.Text
+  groupsFound    Int       @default(0)
+  rowsMerged     Int       @default(0)
+  linksRepointed Int       @default(0)
+  status         String // running | success | failed
+  error          String?   @db.Text
+  createdAt      DateTime  @default(now())
+  finishedAt     DateTime?
 
   @@index([categoryId])
   @@index([createdAt])
@@ -1393,24 +1394,27 @@ model ScrapeResultKeyword {
 
 // All the news papers
 model NewsSource {
-  id                String          @id @default(cuid())
-  name              String
-  normalizedName    String          @unique
-  officialWebsite   String          @unique
-  logoUrl           String?
-  sourceType        NewsSourceType? @default(main_stream)
+  id                 String          @id @default(cuid())
+  name               String
+  normalizedName     String          @unique
+  officialWebsite    String          @unique
+  logoUrl            String?
+  sourceType         NewsSourceType? @default(main_stream)
   /// True when this source was created/synced from News Studio builder configs.
   /// Sticky: once true, hardcoded catalog sync must not clear it.
-  isBuiltFromStudio Boolean         @default(false) @map("is_built_from_studio")
-  isTop             Boolean         @default(false) @map("is_top")
-  isTodays          Boolean         @default(false) @map("is_todays")
-  isTrending        Boolean         @default(false) @map("is_trending")
-  isIngestionEnabled Boolean        @default(true) @map("is_ingestion_enabled")
-  priorityOrder     Int?            @map("priority_order")
-  priorityFor       String?         @map("priority_for")
+  isBuiltFromStudio  Boolean         @default(false) @map("is_built_from_studio")
+  isTop              Boolean         @default(false) @map("is_top")
+  isTodays           Boolean         @default(false) @map("is_todays")
+  isTrending         Boolean         @default(false) @map("is_trending")
+  isIngestionEnabled Boolean         @default(true) @map("is_ingestion_enabled")
+  priorityOrder      Int?            @map("priority_order")
+  priorityFor        String?         @map("priority_for")
 
-  articles   NewsArticle[]
-  mediaLinks NewsMediaSource[]
+  articles      NewsArticle[]
+  mediaLinks    NewsMediaSource[]
+  /// Optional cross-link from the ePaper archive. Nullable on purpose — the
+  /// dumper's folder slugs do not map 1:1 onto this seeded catalog.
+  epaperSources EpaperSource[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1485,35 +1489,35 @@ model NewsArticle {
   districtId        String?
   district          District?        @relation(fields: [districtId], references: [id], onDelete: SetNull)
 
-  sourceWebsite       String
-  author              String?
+  sourceWebsite        String
+  author               String?
   /// Byline -> monitored profile link. Soft reference to `Campaign.id`, no FK,
   /// mirroring `VideoSpeaker.identityCampaignId`. Set per article and only by an
   /// analyst: verifying one story never links the same name on other articles,
   /// and ingest does not inherit it. Bylines are too weak an identifier to
   /// generalise from — desk labels like "নিজস্ব প্রতিবেদক" are reused by ~38
   /// sources, and namesakes recur within one source.
-  authorCampaignId    String?   @map("author_campaign_id")
-  authorVerifiedAt    DateTime? @map("author_verified_at")
-  authorVerifiedBy    String?   @map("author_verified_by")
-  title               String?
-  url                 String?
+  authorCampaignId     String?    @map("author_campaign_id")
+  authorVerifiedAt     DateTime?  @map("author_verified_at")
+  authorVerifiedBy     String?    @map("author_verified_by")
+  title                String?
+  url                  String?
   /// Scrape provenance, e.g. /news/top_news or seed-news-media-group:print-media
-  origin              String?
-  publishedAt         DateTime? // AI-normalized publication wall-clock
-  scrapedAt           DateTime? // Worker scraped_at wall-clock
-  rawPublishedAt      String? // Raw date string from news worker
-  rawScrapedAt        String? // Raw scraped date string from news worker
-  category            String?
-  imageUrl            String?
-  content             String?    @db.Text // Full article content
-  contentHash         String     @unique // SHA-256 hash for deduplication
-  status              NewsStatus @default(NOT_ANALYZED)
-  aiAnalysisStatus    String?    @default("PENDING")
-  analysisStatus      String?    @default("PENDING")
+  origin               String?
+  publishedAt          DateTime? // AI-normalized publication wall-clock
+  scrapedAt            DateTime? // Worker scraped_at wall-clock
+  rawPublishedAt       String? // Raw date string from news worker
+  rawScrapedAt         String? // Raw scraped date string from news worker
+  category             String?
+  imageUrl             String?
+  content              String?    @db.Text // Full article content
+  contentHash          String     @unique // SHA-256 hash for deduplication
+  status               NewsStatus @default(NOT_ANALYZED)
+  aiAnalysisStatus     String?    @default("PENDING")
+  analysisStatus       String?    @default("PENDING")
   // Set when an AI automation worker claims this row (status -> PROCESSING).
   // NewsArticle has no updatedAt, so this is what the stale-claim reaper uses.
-  aiAnalysisClaimedAt DateTime?
+  aiAnalysisClaimedAt  DateTime?
   /// Denormalized copy of this article's most recent NewsAIAnalysis row's
   /// overallSentimentLabel — set at analysis-write time (news.service.ts's
   /// analyzeArticle, technical-panel.service.ts's internal-AI webhook
@@ -1614,6 +1618,190 @@ model NewsArticleKeyword {
   @@index([keywordId])
   @@index([keywordId, newsArticleId])
   @@map("news_article_keywords")
+}
+
+// =============================================================================
+// EPAPER ARCHIVE
+//
+// Daily printed editions dumped by the ePaper micro-service. Hierarchy mirrors
+// the on-disk dump exactly (source -> edition -> page -> article), so ingest is
+// a straight folder walk and every level has an obvious natural key.
+//
+// Each of the 13 sources emits a DIFFERENT page_metadata.json schema. Only a
+// thin normalised projection is modelled as columns; the verbatim original
+// object is kept in EpaperArticle.rawMetadata so a later phase can add features
+// (hotspots, cross-page article stitching) without re-dumping ~280 GB/yr.
+// =============================================================================
+
+/// One newspaper whose printed edition the ePaper dumper collects.
+/// Deliberately separate from `NewsSource`: the dumper's folder slugs do not map
+/// 1:1 onto the seeded news catalog, and these columns (dump dialect, page image
+/// format) are meaningless for online scraping.
+model EpaperSource {
+  id              String  @id @default(cuid())
+  /// Dumper folder name — the join key between disk/ingest payload and DB.
+  slug            String  @unique
+  name            String
+  nameBn          String? @map("name_bn")
+  /// Bare MinIO object key or external URL. Named `logoUrl` so the global
+  /// MinioUrlInterceptor allowlist resolves it with no interceptor edit.
+  logoUrl         String? @map("logo_url")
+  /// Which per-source metadata adapter parses this source's page_metadata.json.
+  metadataDialect String  @map("metadata_dialect")
+  /// Per-source MAJORITY image format, from sniffed magic bytes — 'jpg', 'png'
+  /// (ittefaq, inqilab) or 'webp' (bdpratidin, samakal, which serve WebP under
+  /// a `.jpg` filename). Last-resort fallback only: ingest derives a key's
+  /// extension from the data: URI mime, else the value's own path extension,
+  /// and reaches for this column only when neither exists. It is a majority
+  /// value, so it is not correct for every page (inqilab p1 is JPEG among PNGs)
+  /// — never treat it as the truth for a given file.
+  pageImageFormat String  @default("jpg") @map("page_image_format")
+  isActive        Boolean @default(true) @map("is_active")
+  sortOrder       Int     @default(0) @map("sort_order")
+
+  /// Optional cross-link to the online news source, when one exists.
+  newsSourceId String?     @map("news_source_id")
+  newsSource   NewsSource? @relation(fields: [newsSourceId], references: [id], onDelete: SetNull)
+
+  editions EpaperEdition[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([isActive, sortOrder])
+  @@index([newsSourceId])
+  @@map("epaper_sources")
+}
+
+/// One day's printed edition for one source. Natural key = (source, date).
+model EpaperEdition {
+  id       String       @id @default(cuid())
+  sourceId String       @map("source_id")
+  source   EpaperSource @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+
+  /// Date-only on purpose. The dump folder `2026-09-09` must land on
+  /// 2026-09-09; a timestamptz column read in local time would silently shift a
+  /// Dhaka-evening edition to the previous day and skew the whole calendar.
+  publishedDate DateTime @map("published_date") @db.Date
+
+  pageCount    Int @default(0) @map("page_count")
+  articleCount Int @default(0) @map("article_count")
+
+  status EpaperEditionStatus @default(complete)
+
+  /// Dump path this edition was read from — audit trail for re-running one day.
+  sourceDir String? @map("source_dir")
+  /// Total bytes of page + article objects uploaded, for storage reporting.
+  byteSize  BigInt? @map("byte_size")
+
+  importedAt DateTime @default(now()) @map("imported_at")
+
+  pages    EpaperPage[]
+  articles EpaperArticle[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([sourceId, publishedDate])
+  @@index([sourceId, publishedDate(sort: Desc)])
+  @@index([publishedDate(sort: Desc)])
+  @@index([status])
+  @@map("epaper_editions")
+}
+
+enum EpaperEditionStatus {
+  complete
+  partial
+  failed
+}
+
+model EpaperPage {
+  id        String        @id @default(cuid())
+  editionId String        @map("edition_id")
+  edition   EpaperEdition @relation(fields: [editionId], references: [id], onDelete: Cascade)
+
+  /// Denormalised parent. Written ONLY by the ingest transaction — an edition
+  /// never changes source, so there is no update path that could stale this.
+  sourceId String @map("source_id")
+
+  pageNumber Int @map("page_number")
+
+  /// BARE MinIO object key of the full-page scan. Never a URL.
+  imageKey String @map("image_key")
+  mimeType String @default("image/jpeg") @map("mime_type")
+  width    Int?
+  height   Int?
+  byteSize Int?   @map("byte_size")
+
+  articleCount Int @default(0) @map("article_count")
+
+  articles EpaperArticle[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([editionId, pageNumber])
+  @@index([sourceId, pageNumber])
+  @@map("epaper_pages")
+}
+
+/// One clipped article region on a page. Multi-part crops (part1/2/3) are ONE
+/// row with an ordered `imageKeys` array — they are vertical slices of a single
+/// article, always <= 3, always rendered together. A child table would force a
+/// join on the hottest read path (the reader's crop strip).
+model EpaperArticle {
+  id     String     @id @default(cuid())
+  pageId String     @map("page_id")
+  page   EpaperPage @relation(fields: [pageId], references: [id], onDelete: Cascade)
+
+  /// Denormalised parents so list/filter queries never need a two-hop join.
+  /// Written ONLY by the ingest transaction. See EpaperPage.sourceId.
+  editionId String        @map("edition_id")
+  edition   EpaperEdition @relation(fields: [editionId], references: [id], onDelete: Cascade)
+  sourceId  String        @map("source_id")
+
+  /// `article_index` from page_metadata.json — the only field all 13 dialects share.
+  articleIndex Int     @map("article_index")
+  /// Source-native identifier, whatever the dialect calls it (item_code, tag_id,
+  /// element_id, section_id, area_id, segment_id, image_id, article_id, map_id).
+  /// Stringified. Nullable — not every dialect has one.
+  nativeId     String? @map("native_id")
+
+  title       String? @db.Text
+  /// Plain article text (bdpratidin, kalerkantho).
+  text        String? @db.Text
+  /// HTML body (dailysangram), kept verbatim and unrendered this phase.
+  contentHtml String? @map("content_html") @db.Text
+
+  /// Ordered MinIO object keys: [part1, part2, part3] or [single].
+  imageKeys       String[] @map("image_keys")
+  /// Ordered upstream source URLs, same length and order as imageKeys.
+  sourceImageUrls String[] @map("source_image_urls")
+
+  /// Normalised bbox in ABSOLUTE PAGE PIXELS when the dialect gave us enough to
+  /// compute it; null otherwise. A null box is correct; a guessed one is not.
+  bboxLeft   Int?    @map("bbox_left")
+  bboxTop    Int?    @map("bbox_top")
+  bboxWidth  Int?    @map("bbox_width")
+  bboxHeight Int?    @map("bbox_height")
+  /// Which of the 5 incompatible source encodings the bbox came from:
+  /// 'coordinates' | 'coords_xywh' | 'coords_string' | 'css_style' | 'crop_data'
+  /// | 'dimensions'. Null when the dialect carried no usable box.
+  bboxFormat String? @map("bbox_format")
+
+  /// The ENTIRE original article object from page_metadata.json, verbatim.
+  /// The escape hatch: every dialect-specific field the normaliser dropped
+  /// (linked_section_ids, related_page_no, detail_url, print_url, ref_link,
+  /// alias, relation, area_alias, style) survives here.
+  rawMetadata Json @map("raw_metadata")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([pageId, articleIndex])
+  @@index([editionId, articleIndex])
+  @@index([sourceId, articleIndex])
+  @@map("epaper_articles")
 }
 
 model NewsSearchPanelCache {
@@ -3137,30 +3325,30 @@ model VideoAiJob {
 }
 
 model VideoSpeaker {
-  id                 String    @id @default(cuid())
-  videoId            String    @map("video_id")
-  video              Video     @relation(fields: [videoId], references: [id], onDelete: Cascade)
-  speakerKey         String    @map("speaker_key")
-  label              String
-  summary            String?   @db.Text
-  segmentCount       Int       @default(0) @map("segment_count")
-  verifiedAt         DateTime? @map("verified_at")
+  id                   String                      @id @default(cuid())
+  videoId              String                      @map("video_id")
+  video                Video                       @relation(fields: [videoId], references: [id], onDelete: Cascade)
+  speakerKey           String                      @map("speaker_key")
+  label                String
+  summary              String?                     @db.Text
+  segmentCount         Int                         @default(0) @map("segment_count")
+  verifiedAt           DateTime?                   @map("verified_at")
   /// Who confirmed the identity. `verifiedAt`/`verifiedName` recorded that a
   /// human overrode the model's `label` but never which human — and this is the
   /// only genuinely diffable AI-vs-human pair in the schema, so it is the most
   /// valuable identity label the system produces. An identity assertion in an
   /// OSINT product needs a name against it. Not a hard FK, matching the other
   /// reviewer columns.
-  verifiedBy         String?   @map("verified_by")
-  verifiedName       String?   @map("verified_name")
-  organization       String?
-  photoUrl           String?   @map("photo_url")
-  identityCampaignId String?   @map("identity_campaign_id")
+  verifiedBy           String?                     @map("verified_by")
+  verifiedName         String?                     @map("verified_name")
+  organization         String?
+  photoUrl             String?                     @map("photo_url")
+  identityCampaignId   String?                     @map("identity_campaign_id")
   // ECAPA-TDNN 192-dimensional voice embedding for cross-video speaker matching.
   // Populated by talkshow_asd_worker; pgvector vector(192), not natively typed by Prisma.
   voiceEmbedding       Unsupported("vector(192)")? @map("voice_embedding")
   voiceEmbeddingSource String?                     @map("voice_embedding_source")
-  createdAt          DateTime  @default(now()) @map("created_at")
+  createdAt            DateTime                    @default(now()) @map("created_at")
 
   images   VideoSpeakerImage[]
   segments VideoSegment[]
@@ -3177,12 +3365,12 @@ model VideoSpeaker {
 // lists=100) cannot be expressed in Prisma and lives only in the migration SQL
 // (see prisma/migrations/<voice-profiles>/migration.sql).
 model SpeakerVoiceProfile {
-  id             String                 @id // text PK, assigned by the worker
-  displayName    String                 @map("display_name")
+  id             String                     @id // text PK, assigned by the worker
+  displayName    String                     @map("display_name")
   voiceEmbedding Unsupported("vector(192)") @map("voice_embedding")
-  sampleCount    Int                    @default(1) @map("sample_count")
-  lastSeenAt     DateTime              @default(now()) @map("last_seen_at")
-  createdAt      DateTime              @default(now()) @map("created_at")
+  sampleCount    Int                        @default(1) @map("sample_count")
+  lastSeenAt     DateTime                   @default(now()) @map("last_seen_at")
+  createdAt      DateTime                   @default(now()) @map("created_at")
 
   @@map("speaker_voice_profiles")
 }
@@ -3422,11 +3610,11 @@ model ReportShareLink {
 /// caller holding the URL satisfied it. That is not a team, it is a bearer
 /// token with a friendlier name.
 model Team {
-  id        String       @id @default(cuid())
+  id        String   @id @default(cuid())
   name      String
   createdBy String
-  createdAt DateTime     @default(now())
-  updatedAt DateTime     @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   members    TeamMember[]
   shareLinks ReportShareLink[]
@@ -4573,37 +4761,37 @@ model ChatMessage {
 /// the request body from `bodyTemplate`. Companion to the "partners fetch FROM
 /// us" gateway integration — this is the "we push TO partners" direction.
 model MessagingProvider {
-  id          String   @id @default(cuid())
-  name        String
-  slug        String   @unique
-  endpointUrl String
-  httpMethod  String   @default("POST")
-  authType    String   @default("BEARER")
-  authToken   String?
-  headers     Json?
+  id             String   @id @default(cuid())
+  name           String
+  slug           String   @unique
+  endpointUrl    String
+  httpMethod     String   @default("POST")
+  authType       String   @default("BEARER")
+  authToken      String?
+  headers        Json?
   /// Field mapping / static body. Placeholders $title, $content, $url are
   /// substituted at send time; any other value is passed through verbatim.
-  bodyTemplate Json?
-  enabled     Boolean  @default(true)
-  iconEmoji   String?
+  bodyTemplate   Json?
+  enabled        Boolean  @default(true)
+  iconEmoji      String?
   /// Optional: endpoint that returns the provider-side user list, so operators
   /// can pick specific recipients in the Send modal. All nullable — a provider
   /// without these simply offers no user picker.
   listUsersUrl   String?
-  userListPath   String?   // dot-path to the users array in the response, e.g. "data.users"
-  userIdField    String?   // field on each user used as the recipient id (default "id")
-  userLabelField String?   // field on each user shown to the operator (default "name")
+  userListPath   String? // dot-path to the users array in the response, e.g. "data.users"
+  userIdField    String? // field on each user used as the recipient id (default "id")
+  userLabelField String? // field on each user shown to the operator (default "name")
   /// Free-form bag for settings that don't fit the webhook-shaped columns
   /// above — e.g. Obekhkhon's OAuth2/PKCE { ssoUrl, realm, clientId }. Keeps
   /// this table usable for provider types beyond "POST a bearer-token
   /// webhook" without a new column (or table) per type.
-  extraConfig Json?
-  updatedBy   String?
-  createdBy   String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  extraConfig    Json?
+  updatedBy      String?
+  createdBy      String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 
-  sendLogs    MessagingSendLog[]
+  sendLogs        MessagingSendLog[]
   oauthConnection MessagingProviderConnection?
   oauthStates     MessagingOAuthState[]
 
@@ -4644,8 +4832,8 @@ model MessagingProviderConnection {
 
   /// Identity on the PARTNER side that this connection authenticates as —
   /// shown in the UI ("Connected as x@y") and recorded on every send.
-  subject           String?
-  username          String?
+  subject  String?
+  username String?
 
   /// Single-flight refresh guard. A refresh rotates the refresh token, so two
   /// concurrent refreshes would race and one would persist a token the IdP has
@@ -4700,7 +4888,7 @@ model MessagingOAuthState {
 /// reference ID and HTTP status the provider returns on save, so the send can
 /// be tracked and later correlated with provider-side updates (webhook style).
 model MessagingSendLog {
-  id           String   @id @default(cuid())
+  id           String             @id @default(cuid())
   /// Nullable: built-in channels (WhatsApp) have no MessagingProvider row, so
   /// their sends log with providerId = null and are identified by `channel`.
   providerId   String?
@@ -4717,7 +4905,7 @@ model MessagingSendLog {
   requestBody  Json?
   responseBody Json?
   sentBy       String?
-  createdAt    DateTime @default(now())
+  createdAt    DateTime           @default(now())
 
   @@index([providerId, createdAt])
   @@index([channel, createdAt])

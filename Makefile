@@ -1,5 +1,5 @@
 .PHONY: init-storage init-app init-brain deploy-storage deploy-app deploy-brain deploy-ghcr deploy-status deploy-down fix-crlf fix-worker-entrypoints verify-scrapers sizing-check nginx-check clean-docker setup-auto-deploy logs-app logs-storage \
-	db-push db-push-loss db-generate db-seed db-seed-prompts db-seed-news-prompts db-seed-news-sources db-seed-international-keywords db-seed-international-news-source db-seed-videos db-status db-psql \
+	db-push db-push-loss db-generate db-seed db-seed-prompts db-seed-news-prompts db-seed-news-sources db-seed-international-keywords db-seed-international-news-source db-seed-videos db-seed-epaper-sources db-status db-psql \
 	db-exec-push db-exec-push-loss db-exec-generate db-exec-seed db-exec-seed-prompts db-exec-seed-news-prompts db-exec-seed-news-sources db-exec-seed-international-keywords db-exec-seed-international-news-source db-exec-seed-videos db-exec-seed-twitter-profiles db-exec-seed-telegram-profiles db-copy-schema \
 	dump-db help
 
@@ -42,6 +42,7 @@ help:
 	@echo "    make db-seed-international-keywords  seed international-news topic keyword categories"
 	@echo "    make db-seed-international-news-source seed international and Indian news sources"
 	@echo "    make db-seed-videos   seed demo video intelligence data"
+	@echo "    make db-seed-epaper-sources  seed the 13 ePaper sources (required before importing)"
 	@echo "    make db-status        migration status"
 	@echo "    make db-psql          psql client (args after ARGS=)"
 	@echo ""
@@ -147,6 +148,9 @@ db-seed-international-news-source:
 
 db-seed-videos:
 	bash scripts/deploy/db.sh seed-videos
+
+db-seed-epaper-sources:
+	bash scripts/deploy/db.sh seed-epaper-sources
 
 db-status:
 	bash scripts/deploy/db.sh status

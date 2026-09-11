@@ -43,6 +43,7 @@ One-off container (falcon-core does NOT need to be running; uses .env.app):
   seed-news-status  npm run seed:news-status-filter
   seed-news-media   npm run seed:news-media-groups
   seed-international-keywords  seed 10 international-news topic keyword categories
+  seed-epaper-sources  seed the 13 ePaper sources (required before the first ePaper import)
   seed-geo          tsx prisma/seed-geo.ts
   seed-videos       demo video intelligence data (1 talk show + 1 general)
   seed-twitter-profiles  Twitter/X profiles via auto-fill (exec only — needs running falcon-core + worker-x)
@@ -191,6 +192,9 @@ run_db_action() {
       ;;
     seed-international-news-source)
       shell_cmd="cd ${DB_DIR} && npm run seed:international-news-source"
+      ;;
+    seed-epaper-sources)
+      shell_cmd="cd ${DB_DIR} && npm run seed:epaper-sources"
       ;;
     seed-geo)
       shell_cmd="cd ${DB_DIR} && node dist/prisma/seed-geo.js"
