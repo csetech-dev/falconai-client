@@ -1511,7 +1511,7 @@ model NewsArticle {
   category             String?
   imageUrl             String?
   content              String?    @db.Text // Full article content
-  contentHash          String     @unique // SHA-256 hash for deduplication
+  contentHash          String     @unique // SHA-256(title + "\n" + sourceWebsite) for deduplication
   status               NewsStatus @default(NOT_ANALYZED)
   aiAnalysisStatus     String?    @default("PENDING")
   analysisStatus       String?    @default("PENDING")
@@ -2692,6 +2692,14 @@ model PostAIAnalysis {
   // Detected Entities
   detectedEntities Json? // {organizations: [], people: [], topics: [], locations: []}
 
+  // Content classification (multi-label). Each GOOD post is classified into
+  // one or more of: PROPAGANDA, DISINFORMATION, MISINFORMATION, FALSEHOOD,
+  // INCITING — or NONE when NSI-relevant but none of those apply. The
+  // classificationReason JSON carries the model's Bengali justification per
+  // label, feeding the analyst-feedback loop and making the verdict auditable.
+  contentClassification String[] @default([]) // ["PROPAGANDA","DISINFORMATION","INCITING"] or []
+  classificationReason  Json? // {"PROPAGANDA":"...","INCITING":"..."} or {"NONE":"..."}
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -2707,6 +2715,7 @@ model PostAIAnalysis {
 
   @@index([postId])
   @@index([lastAnalyzedAt])
+  @@index([contentClassification])
   @@map("post_ai_analysis")
 }
 

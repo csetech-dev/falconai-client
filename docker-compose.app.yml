@@ -150,7 +150,7 @@ services:
       COOLDOWN_SECONDS: '600'
       ASSIGNMENT_TIMEOUT: '1800'
       MAX_SHARED: '4'
-      CORE_SERVICE_URL: ${CORE_INTERNAL_URL:-http://falcon-core-automation:4000}
+      CORE_SERVICE_URL: ${PROXY_ROTATOR_CORE_URL:-http://falcon-core:4000}
     healthcheck:
       test:
       - CMD
@@ -1061,6 +1061,11 @@ services:
       STUDIO_USE_PROXY: '1'
       FLARESOLVERR_URL: http://flaresolverr:8191
       FLARESOLVERR_ENABLED: 'true'
+      # Todays/shared fetch: FlareSolverr only as last resort after HTTP/Jina/PW/Wayback.
+      NEWS_FLARESOLVERR_FETCH: ${NEWS_FLARESOLVERR_FETCH:-1}
+      NEWS_FLARESOLVERR_TIMEOUT_MS: ${NEWS_FLARESOLVERR_TIMEOUT_MS:-60000}
+      NEWS_FLARESOLVERR_CONCURRENCY: ${NEWS_FLARESOLVERR_CONCURRENCY:-2}
+      NEWS_FLARESOLVERR_COOKIE_TTL_SECONDS: ${NEWS_FLARESOLVERR_COOKIE_TTL_SECONDS:-300}
       # MinIO — News Source Studio configs (studio-configs/news/*.json)
       MINIO_ENDPOINT: ${MINIO_ENDPOINT:-falcon-minio:9000}
       MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-minioadmin}

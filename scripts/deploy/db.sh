@@ -194,7 +194,13 @@ run_db_action() {
       shell_cmd="cd ${DB_DIR} && npm run seed:international-news-source"
       ;;
     seed-epaper-sources)
-      shell_cmd="cd ${DB_DIR} && npm run seed:epaper-sources"
+      # Compiled artifact, NOT `npm run seed:epaper-sources`. That script is
+      # `ts-node prisma/seed-epaper-sources.ts`, and the runtime image has
+      # neither: ts-node is a devDependency removed by `npm prune --omit=dev`,
+      # and the Dockerfile copies only dist/, schema.prisma, seed-data/ and
+      # reset-news.js — never the prisma/*.ts sources. tsconfig includes
+      # `prisma/*.ts`, so the seed lands in dist/ and this path exists.
+      shell_cmd="cd ${DB_DIR} && node dist/prisma/seed-epaper-sources.js"
       ;;
     seed-geo)
       shell_cmd="cd ${DB_DIR} && node dist/prisma/seed-geo.js"
