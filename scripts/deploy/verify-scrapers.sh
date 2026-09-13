@@ -9,6 +9,7 @@ source "${SCRIPT_DIR}/common.sh"
 SCRAPER_CONTAINERS=(
   scraper-viewer-proxy
   worker-bot-detection
+  worker-epaper
   worker-fb
   worker-linkedin
   worker-news

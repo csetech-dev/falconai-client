@@ -93,6 +93,7 @@ enum ScrapePlatform {
   TELEGRAM
   VIDEO
   YOUTUBE
+  EPAPER
 }
 
 enum EntityType {

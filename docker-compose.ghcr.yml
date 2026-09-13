@@ -164,6 +164,10 @@ services:
     <<: *ghcr-image
     image: ${GHCR_IMAGE_PREFIX}/worker-bot-detection:${FALCON_IMAGE_TAG:-latest}
 
+  worker-epaper:
+    <<: *ghcr-image
+    image: ${GHCR_IMAGE_PREFIX}/worker-epaper:${FALCON_IMAGE_TAG:-latest}
+
   worker-fb:
     <<: [*ghcr-image, *worker-fb-command]
     image: ${GHCR_IMAGE_PREFIX}/worker-fb:${FALCON_IMAGE_TAG:-latest}

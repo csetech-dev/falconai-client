@@ -269,6 +269,8 @@ services:
       WORKER_LINKEDIN_URL: http://worker-linkedin:3011
       WORKER_IMAGE_URL: http://worker-image:3015
       WORKER_X_URL: http://worker-x:3013
+      # Dedicated health sidecar — never shares waitress scrape threads.
+      WORKER_X_HEALTH_URL: http://worker-x:3019
       WORKER_NEWS_URL: http://worker-news:3012
       NEWS_CORE_AUTO_PARALLEL: ${NEWS_CORE_AUTO_PARALLEL:-6}
       NEWS_CORE_AUTO_PARALLEL_WHEN_STUDIO: ${NEWS_CORE_AUTO_PARALLEL_WHEN_STUDIO:-1}
@@ -280,6 +282,13 @@ services:
       NEWS_SOURCE_TIMEOUT_MS: ${NEWS_SOURCE_TIMEOUT_MS:-180000}
       NEWS_SOURCE_MAX_ATTEMPTS: ${NEWS_SOURCE_MAX_ATTEMPTS:-3}
       BOT_DETECTION_WORKER_URL: http://worker-bot-detection:3016
+      WORKER_EPAPER_URL: http://worker-epaper:3017
+      # A full edition is 12-40 pages plus hundreds of article crops; 30 min is the
+      # ceiling, not the expectation.
+      WORKER_EPAPER_TIMEOUT_MS: ${WORKER_EPAPER_TIMEOUT_MS:-1800000}
+      # Editions scraped at once. All 13 sources leave from this one container IP,
+      # so this stays low on purpose.
+      EPAPER_SCRAPE_CONCURRENCY: ${EPAPER_SCRAPE_CONCURRENCY:-2}
       WORKER_API_PASSWORD: ${WORKER_API_PASSWORD:-85234569495721}
       GATEWAY_INTERNAL_API_KEY: ${GATEWAY_INTERNAL_API_KEY}
       GATEWAY_INTERNAL_URL: ${GATEWAY_INTERNAL_URL:-http://falcon-gateway:4010/api/v1}
@@ -774,6 +783,58 @@ services:
         max-file: '3'
     networks:
     - falcon-net
+  worker-epaper:
+    profiles: ["scrapers"]
+    build:
+      context: ./apps/scrapers/worker-epaper
+      dockerfile: Dockerfile
+    container_name: worker-epaper
+    restart: unless-stopped
+    environment:
+      PORT: 3017
+      WORKERS: ${EPAPER_WORKERS:-2}
+      WORKER_API_PASSWORD: ${WORKER_API_PASSWORD:-85234569495721}
+      LOG_LEVEL: INFO
+      # The worker uploads page scans and crops itself and sends core bare object
+      # keys, so core never re-fetches from a hotlink-protected publisher CDN.
+      MINIO_ENDPOINT: ${MINIO_ENDPOINT}
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-minioadmin}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-minioadmin}
+      MINIO_BUCKET: imas
+      MINIO_USE_SSL: 'false'
+      # Ingest goes to the automation plane — the same upstream nginx pins
+      # /api/core/epaper/worker/ to.
+      CORE_INGEST_URL: ${CORE_INTERNAL_URL:-http://falcon-core-automation:4000}/api/v1
+      # Editions are published on a Dhaka calendar; a UTC "today" would fetch
+      # yesterday's paper before 06:00 UTC.
+      EPAPER_TZ: ${EPAPER_TZ:-Asia/Dhaka}
+      SCRAPE_MAX_WORKERS: ${EPAPER_SCRAPE_THREADS:-6}
+      SCRAPE_OUTPUT_DIR: /tmp/epaper
+    healthcheck:
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+      test:
+      - CMD
+      - python
+      - -c
+      - import urllib.request; urllib.request.urlopen('http://localhost:3017/health')
+    deploy:
+      resources:
+        limits:
+          memory: "${FALCON_SZ_EPAPER_MEM:-768M}"
+          cpus: "${FALCON_SZ_EPAPER_CPU:-2}"
+        reservations:
+          memory: "${FALCON_SZ_EPAPER_MEM_RES:-256M}"
+          cpus: "${FALCON_SZ_EPAPER_CPU_RES:-0.25}"
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '3'
+    networks:
+    - falcon-net
   worker-fb:
     profiles: ["scrapers"]
     build:
@@ -1174,6 +1235,13 @@ services:
       # source"), which otherwise sends unauthenticated GraphQL and 403s every
       # lane. Rotatable with `docker compose up -d worker-x` — no image rebuild.
       X_WEB_BEARER: ${X_WEB_BEARER:-}
+      # Self-heal: stuck permit ceiling (~scrape budget), CDP teardown kill,
+      # and a dedicated health port so the panel never waits on scrape threads.
+      X_LANE_STUCK_SECONDS: ${X_LANE_STUCK_SECONDS:-210}
+      X_LANE_STUCK_CHECK_INTERVAL: ${X_LANE_STUCK_CHECK_INTERVAL:-30}
+      X_CDP_TEARDOWN_TIMEOUT: ${X_CDP_TEARDOWN_TIMEOUT:-5}
+      X_CDP_FAULT_HEAL_THRESHOLD: ${X_CDP_FAULT_HEAL_THRESHOLD:-2}
+      X_HEALTH_PORT: ${X_HEALTH_PORT:-3019}
     command:
     - sh
     - -lc
