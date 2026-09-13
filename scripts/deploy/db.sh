@@ -59,6 +59,7 @@ Running falcon-core container (classic docker exec approach):
   exec generate     docker exec … prisma generate
   exec seed         docker exec … full seed flow
   exec seed-prompts docker exec … npm run seed:prompts
+  exec seed-epaper-sources  docker exec … seed the 13 ePaper sources
   exec migrate      docker exec … prisma migrate deploy
   exec status       docker exec … prisma migrate status
   exec <cmd>        docker exec … sh -lc "<cmd>"  (advanced)
@@ -256,7 +257,7 @@ main() {
     generate)
       run_db_action oneoff generate
       ;;
-    seed|seed-prompts|seed-news-prompts|seed-news-sources|seed-news-status|seed-news-media|seed-keyword-categories-type|seed-international-keywords|seed-international-news-source|seed-geo|seed-videos)
+    seed|seed-prompts|seed-news-prompts|seed-news-sources|seed-news-status|seed-news-media|seed-keyword-categories-type|seed-international-keywords|seed-international-news-source|seed-epaper-sources|seed-geo|seed-videos)
       run_db_action oneoff "${command}"
       ;;
     seed-twitter-profiles)
@@ -285,14 +286,17 @@ main() {
           warn "exec push-loss may drop columns/tables — backup first if unsure."
           run_db_action exec push 1
           ;;
-        generate|seed|seed-prompts|seed-news-prompts|seed-news-sources|seed-news-status|seed-news-media|seed-keyword-categories-type|seed-international-keywords|seed-geo|seed-videos|seed-twitter-profiles|seed-telegram-profiles|migrate|status)
+        generate|seed|seed-prompts|seed-news-prompts|seed-news-sources|seed-news-status|seed-news-media|seed-keyword-categories-type|seed-international-keywords|seed-international-news-source|seed-epaper-sources|seed-geo|seed-videos|seed-twitter-profiles|seed-telegram-profiles|migrate|status)
           run_db_action exec "${sub}"
           ;;
         "")
-          die "Usage: db.sh exec <push|push-loss|generate|seed|seed-prompts|seed-news-sources|seed-news-status|seed-news-media|seed-international-keywords|seed-geo|seed-videos|seed-twitter-profiles|seed-telegram-profiles|migrate|status|...>"
+          die "Usage: db.sh exec <push|push-loss|generate|seed|seed-prompts|seed-news-sources|seed-news-status|seed-news-media|seed-international-keywords|seed-epaper-sources|seed-geo|seed-videos|seed-twitter-profiles|seed-telegram-profiles|migrate|status|...>"
           ;;
         *)
-          run_in_running_core "$*"
+          # `sub` was already consumed by this case, so it has to be put back:
+          # `$*` alone drops the first word, which silently turns a single-word
+          # command into an empty `sh -lc ""` that exits 0 having done nothing.
+          run_in_running_core "${sub}${*:+ $*}"
           ;;
       esac
       ;;

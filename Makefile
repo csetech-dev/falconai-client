@@ -1,6 +1,6 @@
 .PHONY: init-storage init-app init-brain deploy-storage deploy-app deploy-brain deploy-ghcr deploy-status deploy-down fix-crlf fix-worker-entrypoints verify-scrapers sizing-check nginx-check clean-docker setup-auto-deploy logs-app logs-storage \
 	db-push db-push-loss db-generate db-seed db-seed-prompts db-seed-news-prompts db-seed-news-sources db-seed-international-keywords db-seed-international-news-source db-seed-videos db-seed-epaper-sources db-status db-psql \
-	db-exec-push db-exec-push-loss db-exec-generate db-exec-seed db-exec-seed-prompts db-exec-seed-news-prompts db-exec-seed-news-sources db-exec-seed-international-keywords db-exec-seed-international-news-source db-exec-seed-videos db-exec-seed-twitter-profiles db-exec-seed-telegram-profiles db-copy-schema \
+	db-exec-push db-exec-push-loss db-exec-generate db-exec-seed db-exec-seed-prompts db-exec-seed-news-prompts db-exec-seed-news-sources db-exec-seed-international-keywords db-exec-seed-international-news-source db-exec-seed-epaper-sources db-exec-seed-videos db-exec-seed-twitter-profiles db-exec-seed-telegram-profiles db-copy-schema \
 	dump-db help
 
 help:
@@ -60,6 +60,7 @@ help:
 	@echo "    make db-exec-seed-news-sources seed News sources data via docker exec (npm run seed:news-sources)"
 	@echo "    make db-exec-seed-international-keywords  seed international-news topic keyword categories via docker exec"
 	@echo "    make db-exec-seed-international-news-source seed international and Indian news sources via docker exec"
+	@echo "    make db-exec-seed-epaper-sources  seed the 13 ePaper sources via docker exec"
 	@echo "    make db-exec-seed-videos  seed demo videos via docker exec"
 	@echo "    make db-exec-seed-twitter-profiles  seed Twitter/X profiles (worker-x must be authorized)"
 	@echo "    make db-exec-seed-telegram-profiles seed Telegram channels (technical-panel Telegram OTP session required)"
@@ -187,6 +188,9 @@ db-exec-seed-international-keywords:
 
 db-exec-seed-international-news-source:
 	bash scripts/deploy/db.sh exec seed-international-news-source
+
+db-exec-seed-epaper-sources:
+	bash scripts/deploy/db.sh exec seed-epaper-sources
 
 db-exec-seed-videos:
 	bash scripts/deploy/db.sh exec seed-videos
