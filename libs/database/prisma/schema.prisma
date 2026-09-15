@@ -32,11 +32,33 @@ enum AuthProvider {
   SAML
 }
 
+/// Verbs a permission can carry.
+///
+/// Scopes inherit (a grant on `technical-panel` satisfies
+/// `technical-panel.proxies`); verbs never do. READ does not imply EDIT, and
+/// EDIT does not imply EXECUTE — the guard matches the action exactly. That
+/// keeps one inheritance axis instead of two, which is where authorization
+/// bugs hide.
+///
+/// The first four are the original set. The rest exist because CRUD could not
+/// say what these operations actually are: exporting a report is not reading
+/// it, publishing is not editing it, and running a deployment command is not
+/// the same privilege as changing a notification digest.
 enum PermissionAction {
   READ
   CREATE
   EDIT
   DELETE
+  /// Run a job or trigger work: scrapes, analysis runs, backfills, deploys.
+  EXECUTE
+  /// Take data out of the system: report DOCX/PDF, CSV, print views.
+  EXPORT
+  /// Publish or sign off on something others will see.
+  APPROVE
+  /// Grant another user access: share links, collaborators.
+  SHARE
+  /// Change configuration, credentials or policy.
+  MANAGE
 }
 
 enum CampaignStatus {
@@ -322,6 +344,7 @@ model User {
   teamMemberships      TeamMember[]
   notifications        UserNotification[]
   permissions          UserPermission[]
+  accessProfiles       UserAccessProfile[]
 
   reportBookmarks     ReportBookmark[]
   bookmarkCollections BookmarkCollection[]
@@ -408,6 +431,72 @@ model UserPermission {
 
   @@unique([userId, resource, action, resourceId])
   @@map("user_permissions")
+}
+
+/// A named, reusable bundle of permissions an admin defines once and assigns.
+///
+/// Per-user grants alone do not scale to a 148-scope tree: every new starter
+/// meant reproducing a colleague's checklist by hand, and a policy change meant
+/// editing every user who had it. A profile is edited in one place and every
+/// member follows.
+///
+/// Effective permissions are the union of a user's assigned profiles and their
+/// individual `UserPermission` rows. Individual grants remain the delegation
+/// unit — `grantedBy`, the grantable ceiling and cascade revocation all
+/// continue to work on them untouched — so profiles add a layer rather than
+/// replacing one.
+model AccessProfile {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  description String?
+  /// Seeded with the product; editable but not deletable.
+  isSystem    Boolean  @default(false)
+  createdBy   String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  scopes  AccessProfileScope[]
+  members UserAccessProfile[]
+
+  @@map("access_profiles")
+}
+
+/// One scope+action pair inside a profile.
+///
+/// `resource` is a dotted scope key from the catalog in
+/// libs/shared-types/src/permissions/catalog.ts, matching UserPermission.
+model AccessProfileScope {
+  id        String           @id @default(cuid())
+  profileId String
+  resource  String
+  action    PermissionAction
+
+  profile AccessProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  @@unique([profileId, resource, action])
+  @@index([profileId])
+  @@map("access_profile_scopes")
+}
+
+/// Assignment of a profile to a user.
+///
+/// Indexed on profileId because editing a profile has to invalidate the
+/// permission cache of every member — the fan-out that a per-user grant never
+/// needed.
+model UserAccessProfile {
+  id         String   @id @default(cuid())
+  userId     String
+  profileId  String
+  assignedBy String
+  createdAt  DateTime @default(now())
+
+  user    User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  profile AccessProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, profileId])
+  @@index([profileId])
+  @@index([userId])
+  @@map("user_access_profiles")
 }
 
 model NotificationTypeConfig {

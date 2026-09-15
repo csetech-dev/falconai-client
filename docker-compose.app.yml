@@ -1666,8 +1666,8 @@ services:
     - falcon-net
   falcon-frontend:
     build:
-      context: ./web
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: web/Dockerfile
       args:
         VITE_API_URL: ${PUBLIC_GATEWAY_URL:-}
         VITE_APP_NAME: ${PUBLIC_APP_NAME:-}
