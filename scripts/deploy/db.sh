@@ -51,6 +51,9 @@ One-off container (falcon-core does NOT need to be running; uses .env.app):
   migrate           prisma migrate deploy
   status            prisma migrate status
   psql              psql client (args after --)
+  perf-schema       apply scripts/performance/apply-performance-schema.sql (CONCURRENTLY, idempotent)
+  perf-inspect      read-only DB baseline (scripts/performance/inspect-database.sql)
+  perf-diagnose-search  STAGE ONLY: plans + collation/pg_trgm checks for topic search and the Latest feed
 
 Running falcon-core container (classic docker exec approach):
   copy-schema       docker cp schema.prisma into running falcon-core
@@ -305,6 +308,26 @@ main() {
         shift
       fi
       run_psql "$@"
+      ;;
+    perf-schema)
+      # Explicit, idempotent performance index/trigger procedure
+      # (CREATE INDEX CONCURRENTLY, advisory lock, refuses INVALID indexes).
+      # Fed on stdin so it runs as separate autocommit statements — never
+      # inside a transaction, which CONCURRENTLY forbids.
+      run_psql -v ON_ERROR_STOP=1 -f - < "${ROOT_DIR}/scripts/performance/apply-performance-schema.sql"
+      ok "Performance schema applied. Check GET /api/v1/health/ready on both core planes, then set PERFORMANCE_SCHEMA_MODE=verify."
+      ;;
+    perf-inspect)
+      # Read-only baseline: settings, connections per application, index validity, pg_stat_statements.
+      # The file sets its own statement_timeout and continues past a failed section.
+      run_psql -f - < "${ROOT_DIR}/scripts/performance/inspect-database.sql"
+      ;;
+    perf-diagnose-search)
+      # STAGE ONLY: EXPLAIN (ANALYZE, BUFFERS) executes the app's search/feed SQL.
+      # Fed on stdin because psql runs in a throwaway container that cannot see
+      # host files (so `db.sh psql -- -f <file>` would not find the file).
+      warn "diagnose-search runs EXPLAIN ANALYZE (executes queries, read-only). Stage databases only."
+      run_psql -f - < "${ROOT_DIR}/scripts/performance/diagnose-search.sql"
       ;;
     -h|--help|help|"")
       usage

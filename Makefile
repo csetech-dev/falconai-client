@@ -13,7 +13,7 @@ help:
 	@echo "  Application stack:"
 	@echo "    make init-app         Create .env.app"
 	@echo "    make sizing-check     Dry-run FALCON_SIZING_PROFILE: does it fit this host?"
-	@echo "    make nginx-check      Validate the api-gateway nginx config (needs docker)"
+	@echo "    make nginx-check      Validate the api-gateway and web nginx configs (needs docker)"
 	@echo "    make deploy-app       Start application stack (build from source)"
 	@echo "    make deploy-ghcr      Pull app stack from GHCR (FlareSolverr = public ghcr.io/flaresolverr)"
 	@echo "    make setup-auto-deploy  Install webhook + deploy-agent for CI auto-deploy"
@@ -104,6 +104,7 @@ sizing-check:
 
 nginx-check:
 	bash scripts/ci/check-nginx-config.sh
+	bash scripts/ci/check-web-nginx-config.sh
 
 deploy-status:
 	bash scripts/deploy/deploy.sh status

@@ -200,6 +200,21 @@ services:
     ports:
     - 12010:4000
     environment: &core-env
+      DASHBOARD_ANALYTICS_CONCURRENCY: ${DASHBOARD_ANALYTICS_CONCURRENCY:-1}
+      # Cap (ms) on interactive-request SQL without a deadline; see bounded-read.ts.
+      INTERACTIVE_STATEMENT_TIMEOUT_MS: ${INTERACTIVE_STATEMENT_TIMEOUT_MS:-30000}
+      # Topic search look-back when no date range is sent (CONTRACTS §12).
+      TOPIC_SEARCH_DEFAULT_DAYS: ${TOPIC_SEARCH_DEFAULT_DAYS:-90}
+      # Opt-in: log parameterised SQL of statements slower than this (ms); empty = off.
+      PRISMA_SLOW_QUERY_LOG_MS: ${PRISMA_SLOW_QUERY_LOG_MS:-}
+      PERFORMANCE_SCHEMA_MODE: ${PERFORMANCE_SCHEMA_MODE:-legacy}
+      METRICS_TOKEN: ${METRICS_TOKEN:-}
+      # Postgres statement / idle-in-transaction timeouts appended to every
+      # pooled connection by libs/database/src/database-url.ts. Previously the
+      # split deploy set neither, so both planes silently ran the 60 s code
+      # default. Values come from the sizing profile (.env.sizing.*).
+      PRISMA_STATEMENT_TIMEOUT_MS: ${CORE_DB_STATEMENT_TIMEOUT_MS:-60000}
+      PRISMA_IDLE_IN_TX_TIMEOUT_MS: ${CORE_DB_IDLE_IN_TX_TIMEOUT_MS:-60000}
       # api | automation | all. The default is `api`: this container serves
       # the dashboard and nothing else, while falcon-core-automation below
       # runs every scheduler, queue consumer and AI loop. They are one
@@ -379,7 +394,11 @@ services:
       # Its own heap and connection pool: this plane holds the big scrape
       # payloads, the api plane mostly serializes query results.
       NODE_OPTIONS: --max-old-space-size=${CORE_AUTO_NODE_HEAP_MB:-2048}
-      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@${POSTGRES_HOST}:${POSTGRES_PORT:-5432}/falcon_ai?schema=public&connection_limit=${CORE_AUTO_DB_CONNECTION_LIMIT:-10}&pool_timeout=${CORE_DB_POOL_TIMEOUT:-20}&application_name=${CORE_AUTO_DB_APP_NAME:-falcon-core-automation}
+      # The automation plane has its own pool wait and statement timeout: a
+      # scrape batch may legitimately wait for a connection, while the api
+      # plane's wait must stay inside the 8 s interactive deadline.
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@${POSTGRES_HOST}:${POSTGRES_PORT:-5432}/falcon_ai?schema=public&connection_limit=${CORE_AUTO_DB_CONNECTION_LIMIT:-10}&pool_timeout=${CORE_AUTO_DB_POOL_TIMEOUT:-20}&application_name=${CORE_AUTO_DB_APP_NAME:-falcon-core-automation}
+      PRISMA_STATEMENT_TIMEOUT_MS: ${CORE_AUTO_DB_STATEMENT_TIMEOUT_MS:-60000}
     depends_on:
       redis:
         condition: service_started
@@ -625,9 +644,14 @@ services:
     ports:
     - 12055:4000
     environment:
+      METRICS_TOKEN: ${METRICS_TOKEN:-}
       WORKER_API_PASSWORD: ${WORKER_API_PASSWORD:-85234569495721}
       SEARCH_STARTUP_SEED: ${SEARCH_STARTUP_SEED:-false}
       SEARCH_SYNC_ON_START: ${SEARCH_SYNC_ON_START:-false}
+      # Shared secret for the /internal/* machine routes (x-internal-api-key).
+      # NO DEFAULT: unset means those routes refuse every request (401);
+      # search itself, the scheduled sync and the startup seed are unaffected.
+      SEARCH_INTERNAL_API_KEY: ${SEARCH_INTERNAL_API_KEY:-}
     depends_on:
       opensearch:
         condition: service_started
@@ -678,6 +702,13 @@ services:
       GATEWAY_INTERNAL_API_KEY: ${GATEWAY_INTERNAL_API_KEY}
       GATEWAY_HMAC_SKEW_SECONDS: ${GATEWAY_HMAC_SKEW_SECONDS:-300}
       GATEWAY_DB_AUTO_INIT: ${GATEWAY_DB_AUTO_INIT:-true}
+      # Image fields in API responses are signed links (/api/external/v1/media/...)
+      # that the gateway serves from the public-read MinIO bucket. Unset MINIO_ENDPOINT
+      # returns those fields as null. GATEWAY_PUBLIC_BASE_URL pins the link host;
+      # empty = the host the partner called.
+      MINIO_ENDPOINT: ${MINIO_ENDPOINT}
+      MINIO_BUCKET: imas
+      GATEWAY_PUBLIC_BASE_URL: ${GATEWAY_PUBLIC_BASE_URL:-}
     depends_on:
       redis:
         condition: service_started

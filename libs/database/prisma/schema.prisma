@@ -337,19 +337,21 @@ model User {
   newsMedia         NewsMedia[]
   groups            Group[]
 
-  reports              Report[]
-  reportTemplates      ReportTemplate[]
-  reportVersions       ReportVersion[]      @relation("ReportVersionAuthor")
-  reportCollaborations ReportCollaborator[]
-  teamMemberships      TeamMember[]
-  notifications        UserNotification[]
-  permissions          UserPermission[]
-  accessProfiles       UserAccessProfile[]
+  reports                Report[]
+  reportTemplates        ReportTemplate[]
+  reportVersions         ReportVersion[]              @relation("ReportVersionAuthor")
+  reportCollaborations   ReportCollaborator[]
+  templateCollaborations ReportTemplateCollaborator[]
+  teamMemberships        TeamMember[]
+  notifications          UserNotification[]
+  permissions            UserPermission[]
+  accessProfiles         UserAccessProfile[]
 
   reportBookmarks     ReportBookmark[]
   bookmarkCollections BookmarkCollection[]
   twoFactor           UserTwoFactor?
   chatThreads         ChatThread[]
+  aiChatUsage         AiChatUsage[]
   sessions            UserSession[]
 
   @@map("users")
@@ -520,6 +522,29 @@ model NotificationTypeConfig {
   @@index([enabled, source])
   @@index([category])
   @@map("notification_type_configs")
+}
+
+/// A single outbound chat an outbound-channel notification can be routed to.
+/// Telegram only today (one global bot, many chats); `channel` leaves room for
+/// WhatsApp later. Types pick destinations via
+/// NotificationTypeConfig.deliveryConfig.<channel>.destinationIds.
+model NotificationDestination {
+  id        String   @id @default(cuid())
+  channel   String   @default("telegram")
+  label     String
+  chatId    String
+  /// Forum topic message_thread_id; "" means the chat's main thread. Not
+  /// nullable so the unique index below actually catches duplicates (Postgres
+  /// treats NULLs as distinct).
+  threadId  String   @default("")
+  enabled   Boolean  @default(true)
+  isDefault Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([channel, chatId, threadId])
+  @@index([channel, enabled])
+  @@map("notification_destinations")
 }
 
 model UserNotification {
@@ -1692,6 +1717,7 @@ model NewsArticle {
   @@index([status, districtId, publishedAt])
   @@index([status, isAlarmingIncident, publishedAt])
   @@index([title(ops: raw("gin_trgm_ops"))], type: Gin, map: "news_articles_title_trgm_idx")
+  @@index([category(ops: raw("gin_trgm_ops"))], type: Gin, map: "news_articles_category_trgm_idx")
   @@map("news_articles")
 }
 
@@ -3584,15 +3610,79 @@ model ReportTemplate {
   blocks             Json
   thumbnailUrl       String?
   tags               String[]               @default([])
+  /// English title, shown under the Bangla `name` on the preset card. The
+  /// desk names its standing deliverables in Bangla and reads the English
+  /// as a subtitle; the hardcoded preset cards carried both, so the table
+  /// has to as well or the migration loses half of every title.
+  nameEn             String?
+  /// Fixed serial the desk's standing dailies print in. Ascending, and
+  /// independent of `updatedAt` so editing one preset does not reshuffle
+  /// the grid.
+  sortOrder          Int                    @default(0)
+  /// Seeded but not offered yet — the block and resolver exist, the desk
+  /// has not signed the deliverable off. Excluded from the catalogue
+  /// rather than deleted, so enabling one is a flag, not a redeploy.
+  isHidden           Boolean                @default(false)
   createdAt          DateTime               @default(now())
   updatedAt          DateTime               @updatedAt
 
-  user    User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
-  reports Report[]
+  user          User?                        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  reports       Report[]
+  collaborators ReportTemplateCollaborator[]
+  teamShares    ReportTemplateTeamShare[]
 
   @@index([userId])
   @@index([category])
+  @@index([isHidden, sortOrder])
   @@map("report_templates")
+}
+
+/// A named colleague's access to someone's custom preset.
+///
+/// Deliberately the same shape and the same `ReportCollaboratorRole` as
+/// `ReportCollaborator`: sharing a preset and sharing a report are the same
+/// question, and two answers would drift. VIEWER can see it in the
+/// catalogue, use it and clone it; EDITOR can also change it. Only the
+/// owner (or an admin) can share or delete.
+model ReportTemplateCollaborator {
+  id         String                 @id @default(cuid())
+  templateId String
+  userId     String
+  role       ReportCollaboratorRole @default(VIEWER)
+  addedBy    String
+  createdAt  DateTime               @default(now())
+
+  template ReportTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  user     User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([templateId, userId])
+  @@index([userId])
+  @@map("report_template_collaborators")
+}
+
+/// A whole team's read access to someone's custom preset.
+///
+/// No token, no password, no expiry — unlike `ReportShareLink`, which is a
+/// way to publish a finished document to people who may not have accounts.
+/// A preset is a blueprint that only makes sense inside the product, so the
+/// only useful audience is a team that already exists here.
+///
+/// `revokedAt` rather than a delete so that un-sharing is auditable, and to
+/// mirror how share links are revoked rather than removed.
+model ReportTemplateTeamShare {
+  id         String    @id @default(cuid())
+  templateId String
+  teamId     String
+  createdBy  String
+  createdAt  DateTime  @default(now())
+  revokedAt  DateTime?
+
+  template ReportTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  team     Team           @relation(fields: [teamId], references: [id], onDelete: Cascade)
+
+  @@unique([templateId, teamId])
+  @@index([teamId])
+  @@map("report_template_team_shares")
 }
 
 model Report {
@@ -3715,8 +3805,9 @@ model Team {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  members    TeamMember[]
-  shareLinks ReportShareLink[]
+  members            TeamMember[]
+  shareLinks         ReportShareLink[]
+  templateTeamShares ReportTemplateTeamShare[]
 
   @@map("teams")
 }
@@ -3900,11 +3991,16 @@ model UserAuditEvent {
 
 /// Entity families that expose refinable AI analysis fields. Values match
 /// AiAnalysisRefineService's entityKind: "post" | "article" | "profile" | "video".
+///
+/// CHAT_MESSAGE is feedback-only: an assistant reply in the AI Assistant can be
+/// voted on (AiFeedbackVote with field ""), but it has no refinable fields, so
+/// AiFieldRefinement / AiFieldEdit never see this value.
 enum AiFieldEntityKind {
   POST
   ARTICLE
   PROFILE
   VIDEO
+  CHAT_MESSAGE
 }
 
 /// One AI refine invocation. Written before the model is called so a
@@ -4818,10 +4914,14 @@ enum ChatMessageRole {
 }
 
 /// A conversation thread belonging to a single user. Created on first
-/// chat turn (or explicitly via POST /ai-chat/threads). The Python
-/// falcon-ai-service reads/writes these via asyncpg raw SQL; Prisma
-/// owns the DDL and the NestJS core-service manages thread CRUD with
-/// JWT-authenticated user isolation.
+/// chat turn (or explicitly via POST /ai-chat/threads).
+///
+/// core-service is the only consumer of this table. (An earlier comment here
+/// claimed the Python falcon-ai-service read it via asyncpg raw SQL — it never
+/// did, and that claim made the table look unsafe to change.)
+///
+/// DELETE /ai-chat/threads/:id archives (status = ARCHIVED). Rows are only
+/// really removed by the separate purge route, which cascades to messages.
 model ChatThread {
   id        String           @id @default(cuid())
   userId    String
@@ -4837,9 +4937,15 @@ model ChatThread {
   @@map("chat_threads")
 }
 
-/// Individual messages within a chat thread. The metadata JSONB column
-/// stores retrieval references, run IDs, provider/model info, and agent
-/// trace data emitted by the Python streaming pipeline.
+/// Individual messages within a chat thread. The metadata JSONB column stores
+/// retrieval references, provider/model info, per-message token usage, and the
+/// streaming lifecycle marker.
+///
+/// metadata.status drives resume-after-reload: an assistant row is created with
+/// content "" and status STREAMING *before* the model is called, its content is
+/// flushed on a throttle as deltas arrive, and it settles to COMPLETE, ERROR or
+/// ABORTED. A client that reloads mid-answer polls this row instead of trying to
+/// rejoin a stream it no longer holds.
 model ChatMessage {
   id        String          @id @default(cuid())
   threadId  String
@@ -4851,6 +4957,55 @@ model ChatMessage {
 
   @@index([threadId, createdAt])
   @@map("chat_messages")
+}
+
+/// One AI assistant turn's cost. Append-only: a row is written after every
+/// stream attempt, including failed and aborted ones, because a turn that burned
+/// upstream tokens before dying still spent money.
+///
+/// Exists because quota enforcement needs "tokens this user spent since UTC
+/// midnight" as an indexed aggregate. The same numbers are mirrored into
+/// ChatMessage.metadata.usage for per-message provenance, but that column is
+/// JSONB behind a thread join — unusable as a filter, and blind to turns that
+/// never produced a message at all.
+///
+/// Also the authority Redis falls back to: when the daily counter key is missing
+/// or Redis is down, the quota check aggregates this table instead, so an outage
+/// degrades latency and never the spend ceiling.
+model AiChatUsage {
+  id     String @id @default(cuid())
+  userId String @map("user_id")
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// Null when the turn died before a thread existed. Deliberately NOT a
+  /// relation: purging a conversation must not erase its cost, or the daily
+  /// aggregate (and the Redis-down fallback that depends on it) walks backwards
+  /// mid-day.
+  threadId           String? @map("thread_id")
+  assistantMessageId String? @map("assistant_message_id")
+
+  provider String
+  model    String?
+
+  promptTokens     Int @default(0) @map("prompt_tokens")
+  completionTokens Int @default(0) @map("completion_tokens")
+  /// Provider-reported total when present, else prompt + completion. Stored
+  /// rather than computed so a provider that bills differently stays honest.
+  totalTokens      Int @default(0) @map("total_tokens")
+
+  /// COMPLETED | FAILED | ABORTED | RATE_LIMITED
+  outcome String @default("COMPLETED")
+
+  /// UTC calendar day this turn is billed to, denormalised so the daily
+  /// aggregate is an index range scan rather than a timezone-dependent
+  /// expression. UTC by contract; the admin UI says so.
+  usageDate  DateTime @map("usage_date") @db.Date
+  occurredAt DateTime @default(now()) @map("occurred_at")
+
+  @@index([userId, usageDate])
+  @@index([userId, occurredAt])
+  @@index([occurredAt])
+  @@map("ai_chat_usage")
 }
 
 /// Registry of external outbound-messaging providers configured from the

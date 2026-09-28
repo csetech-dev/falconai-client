@@ -2,7 +2,7 @@
 #
 # Requires in .env.app (or shell):
 #   GHCR_IMAGE_PREFIX=ghcr.io/<your-org>/falconai
-#   FALCON_IMAGE_TAG=latest          # or a commit SHA for pinning
+#   FALCON_IMAGE_TAG=latest          # main builds; a branch channel (e.g. stage) or a commit SHA to pin
 #
 # Usage (application stack):
 #   docker login ghcr.io -u <user> --password-stdin
