@@ -205,6 +205,9 @@ services:
       INTERACTIVE_STATEMENT_TIMEOUT_MS: ${INTERACTIVE_STATEMENT_TIMEOUT_MS:-30000}
       # Topic search look-back when no date range is sent (CONTRACTS §12).
       TOPIC_SEARCH_DEFAULT_DAYS: ${TOPIC_SEARCH_DEFAULT_DAYS:-90}
+      # SSE idle heartbeat (ms): a ": keepalive" comment on quiet streams so a
+      # front proxy with a 60 s idle timeout does not cut them.
+      SSE_HEARTBEAT_MS: ${SSE_HEARTBEAT_MS:-25000}
       # Opt-in: log parameterised SQL of statements slower than this (ms); empty = off.
       PRISMA_SLOW_QUERY_LOG_MS: ${PRISMA_SLOW_QUERY_LOG_MS:-}
       PERFORMANCE_SCHEMA_MODE: ${PERFORMANCE_SCHEMA_MODE:-legacy}
@@ -1232,6 +1235,7 @@ services:
       context: ./apps/scrapers/worker-x
       dockerfile: Dockerfile
     container_name: worker-x
+    init: true
     restart: unless-stopped
     ports:
     - 12113:3013
@@ -1247,6 +1251,8 @@ services:
       NODE_OPTIONS: --max-old-space-size=512
       # Multi-account routing — per-lane VNC login + scrape (same as worker-fb)
       X_MULTI_ACCOUNT_ENABLED: "true"
+      X_LANE_RATE_LIMIT_SECONDS: "${X_LANE_RATE_LIMIT_SECONDS:-180}"
+      X_LANE_COOLDOWN_SECONDS: "${X_LANE_COOLDOWN_SECONDS:-300}"
       CORE_SERVICE_URL: ${CORE_INTERNAL_URL:-http://falcon-core-automation:4000}
       WORKER_API_PASSWORD: ${WORKER_API_PASSWORD:-85234569495721}
       # MinIO — re-host downloaded tweet videos so the stored link survives X's
@@ -1513,6 +1519,9 @@ services:
       TOOLS_STEP_PAUSE: 0.05
       TOOLS_APPLY_PAUSE: 0.3
       WEB_WORKER_MIN_SCRAPE_GAP_SECONDS: '5'
+      # Parallel searches: one per logged-in lane (Google account), capped here.
+      # Set in .env.app; see docs/performance/WEB_WORKER_SCALING.md for sizing.
+      WEB_WORKER_MAX_SCRAPE_JOBS: ${WEB_WORKER_MAX_SCRAPE_JOBS:-1}
       WEB_WORKER_FAST_NAV: 'true'
       WEB_WORKER_FETCH_OG_IMAGES: 'false'
       WEB_WORKER_HUMAN_WARMUP: 'false'

@@ -186,8 +186,11 @@ services:
   worker-x:
     <<: [*ghcr-image, *worker-x-command]
     image: ${GHCR_IMAGE_PREFIX}/worker-x:${FALCON_IMAGE_TAG:-latest}
+    init: true
     environment:
       X_MULTI_ACCOUNT_ENABLED: "true"
+      X_LANE_RATE_LIMIT_SECONDS: "${X_LANE_RATE_LIMIT_SECONDS:-180}"
+      X_LANE_COOLDOWN_SECONDS: "${X_LANE_COOLDOWN_SECONDS:-300}"
       CORE_SERVICE_URL: ${CORE_INTERNAL_URL:-http://falcon-core-automation:4000}
       X_LANE_PLATFORM: TWITTER
 
