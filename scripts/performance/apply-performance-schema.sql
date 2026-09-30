@@ -64,15 +64,36 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS "news_articles_status_published_desc_nl_
 -- News text search (perf/news-search-progressive, beta 2026-09-30).
 -- news_articles.search_tsv is abandoned (100 % NULL on beta; its trigger and
 -- helpers were never kept in the repo), and ILIKE over article bodies is not
--- viable at any window. Body search matches this expression instead; the
--- query in apps/core-service/src/news/news-search-progressive.ts
--- (NEWS_ARTICLES_FTS_EXPRESSION) must spell it IDENTICALLY or the planner
--- cannot use the index (news-search-progressive.spec.ts checks this line).
--- Bodies are capped at 100k characters so one huge page cannot bloat the
--- index or hit the tsvector size limit. Heavy build (minutes, ~GB): kept
--- OFF the app boot path (libs/database/src/performance-schema.ts), built
--- CONCURRENTLY here, off-peak.
-CREATE INDEX CONCURRENTLY IF NOT EXISTS "news_articles_fts_expr_idx" ON "news_articles" USING GIN (to_tsvector('simple'::regconfig, COALESCE("title", '') || ' ' || left(COALESCE("content", ''), 100000)));
+-- viable at any window. Body search matches news_articles_fts_expr_idx, an
+-- index on news_articles_fts_document(title, content); the query in
+-- apps/core-service/src/news/news-search-progressive.ts
+-- (NEWS_ARTICLES_FTS_EXPRESSION) must call it IDENTICALLY or the planner
+-- cannot use the index (news-search-progressive.spec.ts checks this file).
+--
+-- Why a function and not an inline expression: on beta (PostgreSQL 18.2) an
+-- index on to_tsvector(... left(content, 100000)) failed with "invalid byte
+-- sequence for encoding UTF8: 0xe0 0xa7" on a few 150k-370k character
+-- bodies, although the stored text is valid and to_tsvector of the FULL
+-- content works: truncating large toasted multibyte text (left, substr,
+-- substring) produced the broken bytes. So the function never truncates.
+-- Any error on one row (that one, or "string is too long for tsvector" past
+-- the 1 MB limit) falls back to the title alone instead of failing the build
+-- or the insert. The EXCEPTION block starts a subtransaction, which a
+-- parallel worker cannot do, hence PARALLEL UNSAFE: the index builds
+-- serially. IMMUTABLE is required to index it; do not change the body
+-- without rebuilding the index (REINDEX INDEX CONCURRENTLY).
+-- Heavy build (minutes, ~GB): kept OFF the app boot path
+-- (libs/database/src/performance-schema.ts), built CONCURRENTLY here, off-peak.
+CREATE OR REPLACE FUNCTION news_articles_fts_document(title text, content text) RETURNS tsvector
+LANGUAGE plpgsql IMMUTABLE PARALLEL UNSAFE AS $$
+BEGIN
+  RETURN to_tsvector('simple'::regconfig, COALESCE(title, '') || ' ' || COALESCE(content, ''));
+EXCEPTION WHEN others THEN
+  RETURN to_tsvector('simple'::regconfig, COALESCE(title, ''));
+END;
+$$;
+
+CREATE INDEX CONCURRENTLY IF NOT EXISTS "news_articles_fts_expr_idx" ON "news_articles" USING GIN (news_articles_fts_document("title", "content"));
 
 CREATE OR REPLACE FUNCTION news_ai_analysis_search_tsv_update() RETURNS trigger AS $$
 BEGIN

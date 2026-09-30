@@ -3015,7 +3015,7 @@ SET statement_timeout = '120s';
 --     and নির্বাচন exactly as the app builds it (words as prefix terms, the
 --     three UNION branches, 500 newest candidates, then scoring), 15 s cap.
 --     Expect a Bitmap Index Scan on news_articles_fts_expr_idx in the first
---     branch and no per-row to_tsvector filter; well under 4 s (the app's
+--     branch and no per-row news_articles_fts_document filter; well under 4 s (the app's
 --     per-slice budget). The scoring here keeps only the title-phrase and AI
 --     rank terms; matching and the candidate cap are the app's, verbatim.
 -- ---------------------------------------------------------------------------
@@ -3047,7 +3047,7 @@ SET LOCAL statement_timeout = '15s';
 EXPLAIN (ANALYZE, BUFFERS, TIMING OFF)
 WITH matched AS (
     SELECT na."id" FROM "news_articles" na WHERE na."status" = 'GOOD' AND na."publishedAt" >= (now() AT TIME ZONE 'Asia/Dhaka') - interval '7 days'
-      AND to_tsvector('simple'::regconfig, COALESCE(na."title", '') || ' ' || left(COALESCE(na."content", ''), 100000)) @@ to_tsquery('simple', :'tsq')
+      AND news_articles_fts_document(na."title", na."content") @@ to_tsquery('simple', :'tsq')
     UNION
     SELECT na."id" FROM "news_articles" na WHERE na."status" = 'GOOD' AND na."publishedAt" >= (now() AT TIME ZONE 'Asia/Dhaka') - interval '7 days'
       AND na."title" ILIKE :'likepat'
@@ -3087,7 +3087,7 @@ SET LOCAL statement_timeout = '15s';
 EXPLAIN (ANALYZE, BUFFERS, TIMING OFF)
 WITH matched AS (
     SELECT na."id" FROM "news_articles" na WHERE na."status" = 'GOOD' AND na."publishedAt" >= (now() AT TIME ZONE 'Asia/Dhaka') - interval '7 days'
-      AND to_tsvector('simple'::regconfig, COALESCE(na."title", '') || ' ' || left(COALESCE(na."content", ''), 100000)) @@ to_tsquery('simple', :'tsq')
+      AND news_articles_fts_document(na."title", na."content") @@ to_tsquery('simple', :'tsq')
     UNION
     SELECT na."id" FROM "news_articles" na WHERE na."status" = 'GOOD' AND na."publishedAt" >= (now() AT TIME ZONE 'Asia/Dhaka') - interval '7 days'
       AND na."title" ILIKE :'likepat'
