@@ -12,7 +12,7 @@ SELECT pg_advisory_lock(hashtext('falcon-performance-schema'));
 DO $$ BEGIN
  IF EXISTS (SELECT 1 FROM pg_index i JOIN pg_class c ON c.oid=i.indexrelid
  JOIN pg_namespace n ON n.oid=c.relnamespace
- WHERE n.nspname=current_schema() AND NOT i.indisvalid AND c.relname IN ('keywords_lower_keyword_trgm_idx', 'keywords_lower_keyword_idx', 'news_ai_analysis_trendingKeywords_coalesce_gin_idx', 'news_ai_analysis_topTopics_coalesce_gin_idx', 'news_ai_analysis_summary_trgm_idx', 'news_ai_analysis_what_happened_trgm_idx', 'news_ai_analysis_where_happened_trgm_idx', 'news_ai_analysis_who_involved_trgm_idx', 'news_ai_analysis_between_whom_trgm_idx', 'news_ai_analysis_why_happened_trgm_idx', 'news_ai_analysis_root_cause_trgm_idx', 'news_ai_analysis_what_impact_trgm_idx', 'news_ai_analysis_future_implication_trgm_idx', 'news_ai_analysis_search_tsv_gin_idx', 'news_articles_search_tsv_gin_idx', 'news_articles_category_trgm_idx', 'news_articles_status_published_desc_nl_idx'))
+ WHERE n.nspname=current_schema() AND NOT i.indisvalid AND c.relname IN ('keywords_lower_keyword_trgm_idx', 'keywords_lower_keyword_idx', 'news_ai_analysis_trendingKeywords_coalesce_gin_idx', 'news_ai_analysis_topTopics_coalesce_gin_idx', 'news_ai_analysis_summary_trgm_idx', 'news_ai_analysis_what_happened_trgm_idx', 'news_ai_analysis_where_happened_trgm_idx', 'news_ai_analysis_who_involved_trgm_idx', 'news_ai_analysis_between_whom_trgm_idx', 'news_ai_analysis_why_happened_trgm_idx', 'news_ai_analysis_root_cause_trgm_idx', 'news_ai_analysis_what_impact_trgm_idx', 'news_ai_analysis_future_implication_trgm_idx', 'news_ai_analysis_search_tsv_gin_idx', 'news_articles_search_tsv_gin_idx', 'news_articles_category_trgm_idx', 'news_articles_status_published_desc_nl_idx', 'news_articles_fts_expr_idx'))
  THEN RAISE EXCEPTION 'Invalid performance index found. Drop ONLY the invalid named index CONCURRENTLY, then rerun.'; END IF;
 END $$;
 CREATE INDEX CONCURRENTLY IF NOT EXISTS "keywords_lower_keyword_trgm_idx" ON "keywords" USING GIN (LOWER("keyword") gin_trgm_ops);
@@ -60,6 +60,19 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS "news_articles_category_trgm_idx" ON "ne
 -- maintain on insert. Additive: older app versions are unaffected.
 CREATE INDEX CONCURRENTLY IF NOT EXISTS "news_articles_status_published_desc_nl_idx"
     ON "news_articles" ("status", "publishedAt" DESC NULLS LAST, "id" DESC);
+
+-- News text search (perf/news-search-progressive, beta 2026-09-30).
+-- news_articles.search_tsv is abandoned (100 % NULL on beta; its trigger and
+-- helpers were never kept in the repo), and ILIKE over article bodies is not
+-- viable at any window. Body search matches this expression instead; the
+-- query in apps/core-service/src/news/news-search-progressive.ts
+-- (NEWS_ARTICLES_FTS_EXPRESSION) must spell it IDENTICALLY or the planner
+-- cannot use the index (news-search-progressive.spec.ts checks this line).
+-- Bodies are capped at 100k characters so one huge page cannot bloat the
+-- index or hit the tsvector size limit. Heavy build (minutes, ~GB): kept
+-- OFF the app boot path (libs/database/src/performance-schema.ts), built
+-- CONCURRENTLY here, off-peak.
+CREATE INDEX CONCURRENTLY IF NOT EXISTS "news_articles_fts_expr_idx" ON "news_articles" USING GIN (to_tsvector('simple'::regconfig, COALESCE("title", '') || ' ' || left(COALESCE("content", ''), 100000)));
 
 CREATE OR REPLACE FUNCTION news_ai_analysis_search_tsv_update() RETURNS trigger AS $$
 BEGIN

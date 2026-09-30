@@ -56,7 +56,23 @@
 --      original (pre-9e4b9b920) shape, the deployed dc26959b6 shape and the
 --      fixed shape, over the same 24 h. Scans the window's article bodies and
 --      raw pages on purpose (the original shape); 120 s per statement. Alone:
---        { echo "SET default_transaction_read_only = on;"; sed -n '/############ F\./,/############ done/p' scripts/performance/diagnose-search.sql; } | bash ./scripts/deploy/db.sh psql -- -f -
+--        { echo "SET default_transaction_read_only = on;"; sed -n '/############ F\./,/############ P\./p' scripts/performance/diagnose-search.sql; } | bash ./scripts/deploy/db.sh psql -- -f -
+--   P. progressive topic search (2026-09-29): the first read of slice S0
+--      (last 7 days) and S1 (7–30 days) for ঢাকা and election, every tier
+--      statement as the app runs it, EXPLAIN (ANALYZE, BUFFERS). Alone:
+--        { echo "SET default_transaction_read_only = on;"; sed -n '/############ P\./,/############ done/p' scripts/performance/diagnose-search.sql; } | bash ./scripts/deploy/db.sh psql -- -f -
+--   W. beta dashboards (2026-09-29): dashboard/social/hot-topics (current
+--      bounded reads; the old hoursBack=0 all-time read for comparison) and
+--      the neutral column of snapshot-v2/sentiment-articles (old OR of
+--      NOT IN / IN sublinks vs the early-terminating walk, plus a same-rows
+--      check). 60 s per statement. Alone:
+--        { echo "SET default_transaction_read_only = on;"; sed -n '/############ W\./,/############ done/p' scripts/performance/diagnose-search.sql; } | bash ./scripts/deploy/db.sh psql -- -f -
+--   N. /news?search= (2026-09-30, searchNewsArticleIdsWithFullText): the
+--      search_tsv plumbing (functions, triggers, indexes), search_tsv
+--      coverage of GOOD articles and their AI analyses by publishedAt
+--      window, and the plan of a candidate 7-day slice query for election /
+--      নির্বাচন (15 s cap each). Alone:
+--        { echo "SET default_transaction_read_only = on;"; sed -n '/############ N\./,/############ done/p' scripts/performance/diagnose-search.sql; } | bash ./scripts/deploy/db.sh psql -- -f -
 -- Replace nothing: the terms are ঢাকা (Bangla) and election (English).
 -- ============================================================================
 \set ON_ERROR_STOP off
@@ -2511,6 +2527,589 @@ FROM (
 WHERE rn <= 8
 ORDER BY ord, articles DESC, keyword;
 RESET TIME ZONE;
+\timing off
+
+-- ---------------------------------------------------------------------------
+-- P. Progressive topic search (2026-09-29, topic-search-progressive.ts):
+-- the FIRST read of slice S0 (last 7 days) and slice S1 (7–30 days) for
+-- ঢাকা and election, exactly as the app issues it: each relevance tier walks
+-- news_articles bounded to the slice, LIMIT 25 (TOPIC_SLICE_CHUNK: a page of
+-- 12 + 1 look-ahead, rounded up so the next page is served from cache); a
+-- lower tier runs only while rows are still missing and skips the ids already
+-- taken. Boundaries are on the Bangladesh wall clock and rounded down like
+-- buildTopicSlices (S0/S1 to 30 min, S1/S2 to 2 h). Status filter GOOD.
+-- Each statement is shown with EXPLAIN (ANALYZE, BUFFERS), then run once more
+-- to collect its ids (so the second run is warm). STAGE ONLY. Alone:
+--   { echo "SET default_transaction_read_only = on;"; sed -n '/############ P\./,/############ done/p' scripts/performance/diagnose-search.sql; } | bash ./scripts/deploy/db.sh psql -- -f -
+-- Expected: ঢাকা S0 is tier 1000 alone (Limit -> Nested Loop Semi Join over
+-- news_articles_status_published_desc_nl_idx, a few hundred loops), well
+-- under 1 s warm. S1 is only read by the app when S0 cannot fill a page.
+-- election is rarer: lower tiers run, and S1 shows the cost of widening.
+-- ---------------------------------------------------------------------------
+\echo '############ P. progressive topic search: S0 / S1 slice reads for ঢাকা and election (STAGE ONLY) ############'
+-- One DO statement runs every read below: the timeout covers all of them.
+SET statement_timeout = '600s';
+SET client_min_messages = notice;
+DO $p$
+DECLARE
+    now_bd timestamp := (now() AT TIME ZONE 'Asia/Dhaka')::timestamp(3);
+    b7  timestamp := to_timestamp(floor(extract(epoch FROM (now_bd - interval '7 days'))  / 1800) * 1800) AT TIME ZONE 'UTC';
+    b30 timestamp := to_timestamp(floor(extract(epoch FROM (now_bd - interval '30 days')) / 7200) * 7200) AT TIME ZONE 'UTC';
+    term text;
+    s int;
+    range_sql text;
+    like_pat text;
+    topic_p text; title_p text; summary_p text; amatch_p text; atsv_p text;
+    streams text[];
+    score int;
+    q text;
+    parts text[];
+    taken text[];
+    got text[];
+    need int;
+    line text;
+    started timestamptz;
+BEGIN
+    RAISE NOTICE 'slice bounds (wall clock): S0 >= %, S1 = [%, %)', b7, b30, b7;
+    FOREACH term IN ARRAY ARRAY['ঢাকা', 'election'] LOOP
+        like_pat := '%' || term || '%';
+        topic_p := format($q$EXISTS (SELECT 1 FROM "news_ai_analysis" a WHERE a."articleId" = na.id AND (COALESCE(a."topTopics"::text, '') ILIKE %1$L OR COALESCE(a."trendingKeywords"::text, '') ILIKE %1$L))$q$, like_pat);
+        title_p := format($q$na."title" ILIKE %L$q$, like_pat);
+        summary_p := format($q$EXISTS (SELECT 1 FROM "news_ai_analysis" a WHERE a."articleId" = na.id AND COALESCE(a."summary", '') ILIKE %L)$q$, like_pat);
+        amatch_p := format($q$EXISTS (SELECT 1 FROM "news_ai_analysis" a WHERE a."articleId" = na.id AND (((
+              COALESCE(a."trendingKeywords"::text, '') ILIKE %1$L OR COALESCE(a."topTopics"::text, '') ILIKE %1$L
+              OR COALESCE(a."summary", '') ILIKE %1$L OR COALESCE(a."what_happened", '') ILIKE %1$L
+              OR COALESCE(a."where_happened", '') ILIKE %1$L OR COALESCE(a."who_involved", '') ILIKE %1$L
+              OR COALESCE(a."between_whom", '') ILIKE %1$L OR COALESCE(a."why_happened", '') ILIKE %1$L
+              OR COALESCE(a."root_cause", '') ILIKE %1$L OR COALESCE(a."what_impact", '') ILIKE %1$L
+              OR COALESCE(a."future_implication", '') ILIKE %1$L))
+            OR (a."search_tsv" IS NOT NULL AND a."search_tsv" @@ websearch_to_tsquery('simple', %2$L))))$q$, like_pat, term);
+        atsv_p := format($q$(na."search_tsv" IS NOT NULL AND na."search_tsv" @@ websearch_to_tsquery('simple', %L))$q$, term);
+        FOR s IN 0..1 LOOP
+            range_sql := CASE s
+                WHEN 0 THEN format('na."publishedAt" >= %L::timestamp', b7)
+                ELSE format('(na."publishedAt" >= %L::timestamp AND na."publishedAt" < %L::timestamp)', b30, b7)
+            END;
+            taken := '{}';
+            need := 25;
+            started := clock_timestamp();
+            FOREACH score IN ARRAY ARRAY[1000, 800, 500, 100] LOOP
+                EXIT WHEN need <= 0;
+                streams := CASE score
+                    WHEN 1000 THEN ARRAY[topic_p]
+                    WHEN 800 THEN ARRAY[title_p]
+                    WHEN 500 THEN ARRAY[summary_p || ' AND ' || amatch_p, summary_p || ' AND ' || atsv_p]
+                    ELSE ARRAY[amatch_p, atsv_p]
+                END;
+                parts := '{}';
+                FOREACH q IN ARRAY streams LOOP
+                    parts := parts || format(
+                        'SELECT na.id, na."publishedAt" FROM "news_articles" na WHERE ((na."status" = ''GOOD'') AND %s) AND %s %s ORDER BY na."publishedAt" DESC NULLS LAST, na.id DESC LIMIT %s',
+                        range_sql, q,
+                        CASE WHEN cardinality(taken) > 0 THEN format('AND NOT (na.id = ANY(%L::text[]))', taken) ELSE '' END,
+                        need);
+                END LOOP;
+                q := CASE WHEN cardinality(parts) = 1 THEN parts[1]
+                     ELSE format('SELECT u.id, u."publishedAt" FROM ((%s) UNION (%s)) u ORDER BY u."publishedAt" DESC NULLS LAST, u.id DESC LIMIT %s', parts[1], parts[2], need) END;
+                RAISE NOTICE '--- P % S% tier % (need %)', term, s, score, need;
+                FOR line IN EXECUTE 'EXPLAIN (ANALYZE, BUFFERS) ' || q LOOP
+                    RAISE NOTICE '%', line;
+                END LOOP;
+                EXECUTE format('SELECT COALESCE(array_agg(t.id), ''{}''::text[]) FROM (%s) t', q) INTO got;
+                taken := taken || got;
+                need := need - cardinality(got);
+            END LOOP;
+            RAISE NOTICE '=== P % S%: % rows (25 = slice chunk full), % ms incl. the EXPLAIN runs',
+                term, s, cardinality(taken), round(extract(epoch FROM clock_timestamp() - started) * 1000);
+        END LOOP;
+    END LOOP;
+END
+$p$;
+SET statement_timeout = '120s';
+
+-- ---------------------------------------------------------------------------
+-- W. Beta dashboard endpoints (2026-09-29, perf/beta-dashboard-and-warmup).
+--    STAGE ONLY. EXPLAIN (ANALYZE, BUFFERS) executes every query below.
+--
+--  W1 GET /dashboard/social/hot-topics, the CURRENT shape (social-dashboard
+--     .service.ts computeHotTopics, default 24 h, no filters). Prisma model
+--     queries, reconstructed (not byte-identical; PRISMA_SLOW_QUERY_LOG_MS
+--     gives the exact text): the capped count (HOT_TOPICS_COUNT_CAP 10000,
+--     LIMIT cap+1), the candidates (newest HOT_TOPICS_MAX_POSTS = 1500
+--     analysed posts: postedAt index walk + analysis semi-join), and the two
+--     nested loads Prisma runs for those ids (latest analysis, snapshots).
+--     Expected: Limit -> Nested Loop Semi Join over social_posts_postedAt_idx
+--     (Index Scan Backward), no Sort, well under 1 s warm.
+--  W2 the SAME candidate read for hoursBack=0 ("past topics"), capped at 30
+--     days (HOT_TOPICS_MAX_WINDOW_HOURS 720), and, for comparison, the OLD
+--     hoursBack=0 read: every post ever, no LIMIT (the beta 30 s cut).
+--     The old one is bounded here by a 60 s statement_timeout.
+--  W3 GET /dashboard/news/snapshot-v2/sentiment-articles?sentiment=neutral,
+--     default 24 h window (Bangladesh wall clock), status GOOD, page 1,
+--     limit 10 -> pool K = 50. OLD: the Prisma OR of NOT IN / IN sublinks
+--     (reconstructed), expected SubPlans that read news_ai_analysis whole.
+--     NEW: sentimentArticleWalkSql, the app's SQL with values inlined:
+--     two LIMITed index-order streams (EXISTS neutral label / NOT EXISTS any
+--     analysis) merged by UNION ALL. Expected: two Limit -> Nested Loop
+--     (Anti/Semi) Join over news_articles_status_published_desc_nl_idx, no
+--     SubPlan, no Sort on the article side. W3c checks the two return the
+--     same ids in the same order (t); it runs the old shape too, so it can
+--     hit the 60 s cap on a cold cache (then only W3b's rows count).
+--  Alone:
+--    { echo "SET default_transaction_read_only = on;"; sed -n '/############ W\./,/############ done/p' scripts/performance/diagnose-search.sql; } | bash ./scripts/deploy/db.sh psql -- -f -
+-- ---------------------------------------------------------------------------
+\echo '############ W. beta dashboards: hot-topics and neutral sentiment-articles (STAGE ONLY) ############'
+SET statement_timeout = '60s';
+
+\echo '--- W1a hot-topics 24 h: capped count (LIMIT 10001)'
+EXPLAIN (ANALYZE, BUFFERS)
+SELECT count(*) FROM (
+    SELECT 1 FROM "social_posts" p
+    WHERE p."postedAt" >= now() - interval '24 hours'
+      AND NOT (p."postType" = 'VIDEO' AND p."postType" IS NOT NULL)
+    LIMIT 10001
+) c;
+
+\echo '--- W1b hot-topics 24 h: candidates, newest 1500 analysed posts'
+EXPLAIN (ANALYZE, BUFFERS)
+SELECT p."id", p."campaignId", p."caption", p."totalReactions", p."commentCount", p."shareCount"
+FROM "social_posts" p
+WHERE p."postedAt" >= now() - interval '24 hours'
+  AND NOT (p."postType" = 'VIDEO' AND p."postType" IS NOT NULL)
+  AND p."id" IN (SELECT a."postId" FROM "post_ai_analysis" a WHERE a."postId" IS NOT NULL)
+ORDER BY p."postedAt" DESC
+LIMIT 1500;
+
+\echo '--- W1c hot-topics 24 h: nested loads for the candidate ids (analysis, snapshots)'
+EXPLAIN (ANALYZE, BUFFERS)
+WITH c AS (
+    SELECT p."id" FROM "social_posts" p
+    WHERE p."postedAt" >= now() - interval '24 hours'
+      AND NOT (p."postType" = 'VIDEO' AND p."postType" IS NOT NULL)
+      AND p."id" IN (SELECT a."postId" FROM "post_ai_analysis" a WHERE a."postId" IS NOT NULL)
+    ORDER BY p."postedAt" DESC
+    LIMIT 1500
+)
+SELECT a."postId", a."summary", a."detectedEntities", a."mainThemes", a."viralPotentialScore", a."sentimentLabel"
+FROM "post_ai_analysis" a WHERE a."postId" IN (SELECT id FROM c);
+EXPLAIN (ANALYZE, BUFFERS)
+WITH c AS (
+    SELECT p."id" FROM "social_posts" p
+    WHERE p."postedAt" >= now() - interval '24 hours'
+      AND NOT (p."postType" = 'VIDEO' AND p."postType" IS NOT NULL)
+      AND p."id" IN (SELECT a."postId" FROM "post_ai_analysis" a WHERE a."postId" IS NOT NULL)
+    ORDER BY p."postedAt" DESC
+    LIMIT 1500
+)
+SELECT s."socialPostId", s."reactionCount", s."commentCount", s."shareCount", s."rank"
+FROM "social_post_snapshots" s WHERE s."socialPostId" IN (SELECT id FROM c)
+ORDER BY s."rank" DESC, s."scrapedAt" DESC;
+
+\echo '--- W2a hot-topics hoursBack=0, NEW: candidates capped at 30 days, newest 1500 analysed'
+EXPLAIN (ANALYZE, BUFFERS)
+SELECT p."id"
+FROM "social_posts" p
+WHERE p."postedAt" >= now() - interval '720 hours'
+  AND NOT (p."postType" = 'VIDEO' AND p."postType" IS NOT NULL)
+  AND p."id" IN (SELECT a."postId" FROM "post_ai_analysis" a WHERE a."postId" IS NOT NULL)
+ORDER BY p."postedAt" DESC
+LIMIT 1500;
+
+\echo '--- W2b hot-topics hoursBack=0, OLD: every post ever, no LIMIT (60 s cap here)'
+EXPLAIN (ANALYZE, BUFFERS)
+SELECT p."id", p."campaignId", p."caption"
+FROM "social_posts" p
+WHERE NOT (p."postType" = 'VIDEO' AND p."postType" IS NOT NULL);
+
+\echo '--- W3a sentiment-articles neutral, OLD: OR of NOT IN / IN sublinks, K = 50'
+EXPLAIN (ANALYZE, BUFFERS)
+SELECT na."id"
+FROM "news_articles" na
+WHERE na."status" = 'GOOD'
+  AND na."publishedAt" >= (now() AT TIME ZONE 'Asia/Dhaka') - interval '24 hours'
+  AND na."publishedAt" <= (now() AT TIME ZONE 'Asia/Dhaka')
+  AND (na."id" NOT IN (SELECT s0."articleId" FROM "news_ai_analysis" s0 WHERE s0."articleId" IS NOT NULL)
+       OR na."id" IN (SELECT s."articleId" FROM "news_ai_analysis" s
+                      WHERE s."overallSentimentLabel" IN ('নিরপেক্ষ', 'NEUTRAL', 'neutral', 'Neutral')
+                        AND s."articleId" IS NOT NULL))
+ORDER BY na."publishedAt" DESC NULLS LAST, na."id" DESC
+LIMIT 50;
+
+\echo '--- W3b sentiment-articles neutral, NEW: two early-terminating streams, UNION ALL, K = 50'
+EXPLAIN (ANALYZE, BUFFERS)
+SELECT u."id"
+FROM (
+    (SELECT na."id", na."publishedAt"
+     FROM "news_articles" na
+     WHERE (na."status" = 'GOOD'
+            AND (na."publishedAt" >= (now() AT TIME ZONE 'Asia/Dhaka') - interval '24 hours'
+                 AND na."publishedAt" <= (now() AT TIME ZONE 'Asia/Dhaka')))
+       AND EXISTS (SELECT 1 FROM "news_ai_analysis" s
+                   WHERE s."articleId" = na."id"
+                     AND s."overallSentimentLabel" IN ('নিরপেক্ষ', 'NEUTRAL', 'neutral', 'Neutral'))
+     ORDER BY na."publishedAt" DESC NULLS LAST, na."id" DESC
+     LIMIT 50)
+    UNION ALL
+    (SELECT na."id", na."publishedAt"
+     FROM "news_articles" na
+     WHERE (na."status" = 'GOOD'
+            AND (na."publishedAt" >= (now() AT TIME ZONE 'Asia/Dhaka') - interval '24 hours'
+                 AND na."publishedAt" <= (now() AT TIME ZONE 'Asia/Dhaka')))
+       AND NOT EXISTS (SELECT 1 FROM "news_ai_analysis" s0 WHERE s0."articleId" = na."id")
+     ORDER BY na."publishedAt" DESC NULLS LAST, na."id" DESC
+     LIMIT 50)
+) u
+ORDER BY u."publishedAt" DESC NULLS LAST, u."id" DESC
+LIMIT 50;
+
+\echo '--- W3c same ids, same order (expect t; f only if an article was inserted between the two reads)'
+WITH bounds AS (
+    SELECT (now() AT TIME ZONE 'Asia/Dhaka') - interval '24 hours' AS lo, (now() AT TIME ZONE 'Asia/Dhaka') AS hi
+),
+old AS (
+    SELECT array_agg(id) AS ids FROM (
+        SELECT na."id" FROM "news_articles" na, bounds b
+        WHERE na."status" = 'GOOD' AND na."publishedAt" >= b.lo AND na."publishedAt" <= b.hi
+          AND (na."id" NOT IN (SELECT s0."articleId" FROM "news_ai_analysis" s0 WHERE s0."articleId" IS NOT NULL)
+               OR na."id" IN (SELECT s."articleId" FROM "news_ai_analysis" s
+                              WHERE s."overallSentimentLabel" IN ('নিরপেক্ষ', 'NEUTRAL', 'neutral', 'Neutral')
+                                AND s."articleId" IS NOT NULL))
+        ORDER BY na."publishedAt" DESC NULLS LAST, na."id" DESC LIMIT 50) o
+),
+new AS (
+    SELECT array_agg(id) AS ids FROM (
+        SELECT u."id" FROM (
+            (SELECT na."id", na."publishedAt" FROM "news_articles" na, bounds b
+             WHERE na."status" = 'GOOD' AND na."publishedAt" >= b.lo AND na."publishedAt" <= b.hi
+               AND EXISTS (SELECT 1 FROM "news_ai_analysis" s WHERE s."articleId" = na."id"
+                           AND s."overallSentimentLabel" IN ('নিরপেক্ষ', 'NEUTRAL', 'neutral', 'Neutral'))
+             ORDER BY na."publishedAt" DESC NULLS LAST, na."id" DESC LIMIT 50)
+            UNION ALL
+            (SELECT na."id", na."publishedAt" FROM "news_articles" na, bounds b
+             WHERE na."status" = 'GOOD' AND na."publishedAt" >= b.lo AND na."publishedAt" <= b.hi
+               AND NOT EXISTS (SELECT 1 FROM "news_ai_analysis" s0 WHERE s0."articleId" = na."id")
+             ORDER BY na."publishedAt" DESC NULLS LAST, na."id" DESC LIMIT 50)
+        ) u ORDER BY u."publishedAt" DESC NULLS LAST, u."id" DESC LIMIT 50) n
+)
+SELECT old.ids IS NOT DISTINCT FROM new.ids AS identical, cardinality(new.ids) AS rows FROM old, new;
+
+SET statement_timeout = '120s';
+
+-- ---------------------------------------------------------------------------
+-- N. /api/core/news?search=<term> times out (2026-09-30). The predicate of
+--    searchNewsArticleIdsWithFullText (news.service.ts) is to be replaced by a
+--    progressive, date-sliced query; this section checks what that query can
+--    rely on. Read-only: catalog reads, counts, and EXPLAIN ANALYZE inside
+--    READ ONLY transactions that end in ROLLBACK. No DDL, no writes.
+--
+--    ALSO RUN ON THE APP HOST (shell, not SQL), from the repo root:
+--      grep -E '^(CORE_DB_CONNECTION_LIMIT|FALCON_SIZING_PROFILE)=' .env.app
+--
+--  N1 plumbing: do safe_to_tsvector, news_articles_search_tsv_payload and
+--     news_ai_analysis_search_tsv_update exist (present = f means missing);
+--     the non-internal triggers on news_articles and news_ai_analysis
+--     (tgenabled O = enabled, D = disabled); the indexes the slice query
+--     needs, with valid/ready, size and idx_scan (present = f: missing;
+--     valid = f: a failed CONCURRENTLY build the planner ignores).
+--  N2 pg_get_functiondef of news_articles_search_tsv_payload,
+--     safe_to_tsvector and every trigger function on news_articles. Missing
+--     functions just return no row (the WHERE is the guard), nothing aborts.
+--  N3 search_tsv coverage, status GOOD: pg_stats null_frac (instant, all
+--     statuses), then exact counts for the last 7 / 30 / 90 / 365 days and
+--     all time, one statement each (\gexec) so a slow window cannot hide the
+--     others. publishedAt is the Dhaka wall clock stored as timestamp, so the
+--     windows are measured from now() AT TIME ZONE 'Asia/Dhaka' like the app;
+--     the (status, publishedAt) indexes serve the short windows. The same for
+--     news_ai_analysis.search_tsv of those articles' analyses, plus the
+--     whole-table analysis count. A high NULL share means the tsvector branch
+--     cannot find those rows and the ILIKE branches must.
+--  N4 EXPLAIN (ANALYZE, BUFFERS, TIMING OFF) of the candidate 7-day slice for
+--     election and নির্বাচন, SET LOCAL statement_timeout = 15s, ROLLBACK.
+--     The term is prepared as the app prepares it: NFKC, zero-width chars
+--     removed, whitespace collapsed, lower-cased, at most 10 words, the
+--     tsquery characters stripped, words joined with ' | ' and passed to
+--     to_tsquery('simple', ...) (for one word this equals plainto_tsquery).
+--     Predicates are spelled the way their indexes are built
+--     (news-search-indexes.spec.ts): bare na."title" for
+--     news_articles_title_trgm_idx, COALESCE(a."summary", '') for
+--     news_ai_analysis_summary_trgm_idx, and "search_tsv IS NOT NULL AND
+--     search_tsv @@ ..." to match the partial search_tsv GIN indexes.
+--     Expected good: Limit -> Index Scan (Backward) on a (status,
+--     publishedAt) index with the OR as a Filter and a per-row probe of
+--     news_ai_analysis("articleId"), or a BitmapOr over the GIN indexes plus
+--     a small Sort; bad: a Seq Scan of news_articles, or hitting the 15 s cap.
+--  Alone:
+--    { echo "SET default_transaction_read_only = on;"; sed -n '/############ N\./,/############ done/p' scripts/performance/diagnose-search.sql; } | bash ./scripts/deploy/db.sh psql -- -f -
+-- ---------------------------------------------------------------------------
+\echo '############ N. news text search: search_tsv plumbing, coverage and a 7-day slice plan (election, নির্বাচন) ############'
+SET statement_timeout = '60s';
+SET lock_timeout = '2s';
+SET application_name = 'falcon-diagnose-news-text-search';
+\timing on
+
+\echo '--- N1a tsvector functions (present = f: missing)'
+SELECT f.name, p.oid IS NOT NULL AS present, n.nspname AS schema,
+       p.oid::regprocedure AS signature, l.lanname AS language,
+       p.provolatile AS volatility, pg_get_function_result(p.oid) AS returns
+FROM (VALUES ('safe_to_tsvector'), ('news_articles_search_tsv_payload'),
+             ('news_ai_analysis_search_tsv_update')) AS f(name)
+LEFT JOIN pg_proc p ON p.proname = f.name
+LEFT JOIN pg_namespace n ON n.oid = p.pronamespace
+LEFT JOIN pg_language l ON l.oid = p.prolang
+ORDER BY f.name, signature;
+
+\echo '--- N1b triggers on news_articles and news_ai_analysis (internal ones excluded; tgenabled O = on, D = off)'
+SELECT c.relname AS "table", t.tgname AS trigger, t.tgenabled AS enabled,
+       t.tgfoid::regprocedure AS function, pg_get_triggerdef(t.oid) AS definition
+FROM pg_trigger t
+JOIN pg_class c ON c.oid = t.tgrelid
+WHERE c.relname IN ('news_articles', 'news_ai_analysis')
+  AND NOT t.tgisinternal
+ORDER BY c.relname, t.tgname;
+
+\echo '--- N1c indexes the slice query needs (present = f: missing; valid = f: unusable)'
+SELECT x.name, c.oid IS NOT NULL AS present, i.indisvalid AS valid, i.indisready AS ready,
+       t.relname AS "table", pg_size_pretty(pg_relation_size(c.oid)) AS size,
+       s.idx_scan, pg_get_indexdef(c.oid) AS definition
+FROM (VALUES ('news_articles_search_tsv_gin_idx'), ('news_articles_title_trgm_idx'),
+             ('news_ai_analysis_search_tsv_gin_idx'), ('news_ai_analysis_summary_trgm_idx'),
+             ('news_articles_status_published_desc_nl_idx'), ('news_articles_status_publishedAt_idx'),
+             ('news_ai_analysis_articleId_idx')) AS x(name)
+LEFT JOIN pg_class c ON c.relname = x.name AND c.relkind = 'i'
+LEFT JOIN pg_index i ON i.indexrelid = c.oid
+LEFT JOIN pg_class t ON t.oid = i.indrelid
+LEFT JOIN pg_stat_user_indexes s ON s.indexrelid = c.oid
+ORDER BY x.name;
+
+\echo '--- N2 function definitions: payload, safe_to_tsvector, news_articles trigger functions (no row = missing)'
+SELECT p.oid::regprocedure AS function, pg_get_functiondef(p.oid) AS definition
+FROM pg_proc p
+WHERE p.prokind = 'f'
+  AND (p.proname IN ('news_articles_search_tsv_payload', 'safe_to_tsvector')
+       OR p.oid IN (SELECT t.tgfoid FROM pg_trigger t JOIN pg_class c ON c.oid = t.tgrelid
+                    WHERE c.relname = 'news_articles' AND NOT t.tgisinternal))
+ORDER BY p.proname;
+
+\echo '--- N3a search_tsv null_frac from pg_stats (planner statistics, all statuses, instant)'
+SELECT tablename, attname, null_frac, n_distinct
+FROM pg_stats
+WHERE tablename IN ('news_articles', 'news_ai_analysis') AND attname = 'search_tsv'
+ORDER BY tablename;
+
+\echo '--- N3b news_articles.search_tsv coverage, status GOOD, by publishedAt window (one statement each)'
+SELECT format($g$SELECT %L AS "window", count(*) AS good_articles,
+       count(*) FILTER (WHERE na."search_tsv" IS NULL) AS tsv_null,
+       round(100.0 * count(*) FILTER (WHERE na."search_tsv" IS NULL) / NULLIF(count(*), 0), 2) AS pct_null
+FROM "news_articles" na
+WHERE na."status" = 'GOOD'%s$g$,
+       COALESCE(w.span, 'all time'),
+       CASE WHEN w.span IS NULL THEN ''
+            ELSE format(E'\n  AND na."publishedAt" >= (now() AT TIME ZONE ''Asia/Dhaka'') - interval %L', w.span) END)
+FROM unnest(ARRAY['7 days', '30 days', '90 days', '365 days', NULL]::text[]) WITH ORDINALITY AS w(span, ord)
+ORDER BY w.ord
+\gexec
+
+\echo '--- N3c news_ai_analysis.search_tsv coverage for the analyses of those GOOD articles, same windows'
+SELECT format($g$SELECT %L AS "window", count(DISTINCT a."articleId") AS articles_with_analysis,
+       count(*) AS analyses,
+       count(*) FILTER (WHERE a."search_tsv" IS NULL) AS ai_tsv_null,
+       round(100.0 * count(*) FILTER (WHERE a."search_tsv" IS NULL) / NULLIF(count(*), 0), 2) AS pct_null,
+       count(*) FILTER (WHERE COALESCE(a."summary", '') = '') AS empty_summary
+FROM "news_articles" na
+JOIN "news_ai_analysis" a ON a."articleId" = na.id
+WHERE na."status" = 'GOOD'%s$g$,
+       COALESCE(w.span, 'all time'),
+       CASE WHEN w.span IS NULL THEN ''
+            ELSE format(E'\n  AND na."publishedAt" >= (now() AT TIME ZONE ''Asia/Dhaka'') - interval %L', w.span) END)
+FROM unnest(ARRAY['7 days', '30 days', '90 days', '365 days', NULL]::text[]) WITH ORDINALITY AS w(span, ord)
+ORDER BY w.ord
+\gexec
+
+\echo '--- N3d news_ai_analysis.search_tsv, whole table (any article status, orphans included)'
+SELECT count(*) AS analyses,
+       count(*) FILTER (WHERE a."search_tsv" IS NULL) AS ai_tsv_null,
+       round(100.0 * count(*) FILTER (WHERE a."search_tsv" IS NULL) / NULLIF(count(*), 0), 2) AS pct_null,
+       count(*) FILTER (WHERE a."articleId" IS NULL) AS no_article
+FROM "news_ai_analysis" a;
+
+\echo '--- N4a candidate 7-day slice, term election (15 s cap, READ ONLY, ROLLBACK)'
+\set term 'election'
+SELECT btrim(regexp_replace(regexp_replace(normalize(:'term', NFKC), '[​-‍﻿]', '', 'g'), '\s+', ' ', 'g')) AS nterm \gset
+SELECT lower(:'nterm') AS nterm \gset
+SELECT '%' || :'nterm' || '%' AS likepat,
+       array_to_string(ARRAY(
+           SELECT tok FROM (
+               SELECT regexp_replace(w.word, '["''\\()|&!*:<>]', '', 'g') AS tok, w.n
+               FROM regexp_split_to_table(:'nterm', '\s+') WITH ORDINALITY AS w(word, n)
+               WHERE w.word <> ''
+               ORDER BY w.n LIMIT 10
+           ) s WHERE s.tok <> '' ORDER BY s.n), ' | ') AS tsq \gset
+\echo 'normalised term:' :'nterm' ' ILIKE pattern:' :'likepat' ' to_tsquery input:' :'tsq'
+BEGIN TRANSACTION READ ONLY;
+SET LOCAL statement_timeout = '15s';
+EXPLAIN (ANALYZE, BUFFERS, TIMING OFF)
+SELECT na.id
+FROM "news_articles" na
+WHERE na."status" = 'GOOD'
+  AND na."publishedAt" >= (now() AT TIME ZONE 'Asia/Dhaka') - interval '7 days'
+  AND (
+        (na."search_tsv" IS NOT NULL AND na."search_tsv" @@ to_tsquery('simple', :'tsq'))
+        OR na."title" ILIKE :'likepat'
+        OR EXISTS (
+            SELECT 1 FROM "news_ai_analysis" a
+            WHERE a."articleId" = na.id
+              AND ((a."search_tsv" IS NOT NULL AND a."search_tsv" @@ to_tsquery('simple', :'tsq'))
+                   OR COALESCE(a."summary", '') ILIKE :'likepat')
+        )
+      )
+ORDER BY na."publishedAt" DESC NULLS LAST, na.id DESC
+LIMIT 500;
+ROLLBACK;
+
+\echo '--- N4b candidate 7-day slice, term নির্বাচন (15 s cap, READ ONLY, ROLLBACK)'
+\set term 'নির্বাচন'
+SELECT btrim(regexp_replace(regexp_replace(normalize(:'term', NFKC), '[​-‍﻿]', '', 'g'), '\s+', ' ', 'g')) AS nterm \gset
+SELECT lower(:'nterm') AS nterm \gset
+SELECT '%' || :'nterm' || '%' AS likepat,
+       array_to_string(ARRAY(
+           SELECT tok FROM (
+               SELECT regexp_replace(w.word, '["''\\()|&!*:<>]', '', 'g') AS tok, w.n
+               FROM regexp_split_to_table(:'nterm', '\s+') WITH ORDINALITY AS w(word, n)
+               WHERE w.word <> ''
+               ORDER BY w.n LIMIT 10
+           ) s WHERE s.tok <> '' ORDER BY s.n), ' | ') AS tsq \gset
+\echo 'normalised term:' :'nterm' ' ILIKE pattern:' :'likepat' ' to_tsquery input:' :'tsq'
+BEGIN TRANSACTION READ ONLY;
+SET LOCAL statement_timeout = '15s';
+EXPLAIN (ANALYZE, BUFFERS, TIMING OFF)
+SELECT na.id
+FROM "news_articles" na
+WHERE na."status" = 'GOOD'
+  AND na."publishedAt" >= (now() AT TIME ZONE 'Asia/Dhaka') - interval '7 days'
+  AND (
+        (na."search_tsv" IS NOT NULL AND na."search_tsv" @@ to_tsquery('simple', :'tsq'))
+        OR na."title" ILIKE :'likepat'
+        OR EXISTS (
+            SELECT 1 FROM "news_ai_analysis" a
+            WHERE a."articleId" = na.id
+              AND ((a."search_tsv" IS NOT NULL AND a."search_tsv" @@ to_tsquery('simple', :'tsq'))
+                   OR COALESCE(a."summary", '') ILIKE :'likepat')
+        )
+      )
+ORDER BY na."publishedAt" DESC NULLS LAST, na.id DESC
+LIMIT 500;
+ROLLBACK;
+
+\timing off
+SET statement_timeout = '120s';
+
+-- ---------------------------------------------------------------------------
+-- O. The shipped progressive news text search (perf/news-search-progressive,
+--    news-search-progressive.ts buildNewsSearchSql), after the deploy. Read-
+--    only: catalog reads, one count, EXPLAIN ANALYZE in READ ONLY ROLLBACK.
+--  O1 news_articles_fts_expr_idx and news_ai_analysis_search_tsv_gin_idx:
+--     present / valid / size / idx_scan (valid = f: drop it CONCURRENTLY and
+--     rerun db.sh perf-schema), and the AI search_tsv NULL share (the
+--     backfill, RUNBOOK §4, brings it to ~0).
+--  O2 EXPLAIN (ANALYZE, BUFFERS, TIMING OFF) of the 7-day slice for election
+--     and নির্বাচন exactly as the app builds it (words as prefix terms, the
+--     three UNION branches, 500 newest candidates, then scoring), 15 s cap.
+--     Expect a Bitmap Index Scan on news_articles_fts_expr_idx in the first
+--     branch and no per-row to_tsvector filter; well under 4 s (the app's
+--     per-slice budget). The scoring here keeps only the title-phrase and AI
+--     rank terms; matching and the candidate cap are the app's, verbatim.
+-- ---------------------------------------------------------------------------
+\echo '############ O1 news text-search indexes and AI search_tsv coverage ############'
+SELECT i.relname AS index, x.indisvalid AS valid, x.indisready AS ready,
+       pg_size_pretty(pg_relation_size(i.oid)) AS size, s.idx_scan
+FROM pg_class i
+JOIN pg_index x ON x.indexrelid = i.oid
+LEFT JOIN pg_stat_user_indexes s ON s.indexrelid = i.oid
+WHERE i.relname IN ('news_articles_fts_expr_idx', 'news_ai_analysis_search_tsv_gin_idx', 'news_articles_title_trgm_idx',
+                    'news_articles_status_published_desc_nl_idx')
+ORDER BY 1;
+SELECT count(*) FILTER (WHERE search_tsv IS NULL) AS ai_tsv_null, count(*) AS ai_rows FROM news_ai_analysis;
+
+\timing on
+\echo '--- O2a shipped 7-day slice, term election (15 s cap, READ ONLY, ROLLBACK)'
+\set term 'election'
+SELECT lower(btrim(regexp_replace(regexp_replace(normalize(:'term', NFKC), '[​-‍﻿]', '', 'g'), '\s+', ' ', 'g'))) AS nterm \gset
+SELECT '%' || :'nterm' || '%' AS likepat,
+       array_to_string(ARRAY(
+           SELECT tok || ':*' FROM (
+               SELECT regexp_replace(w.word, '["''\\()|&!*:<>]', '', 'g') AS tok, w.n
+               FROM regexp_split_to_table(:'nterm', '\s+') WITH ORDINALITY AS w(word, n)
+               WHERE w.word <> '' ORDER BY w.n LIMIT 10
+           ) s WHERE s.tok <> '' ORDER BY s.n), ' | ') AS tsq \gset
+\echo 'to_tsquery input:' :'tsq'
+BEGIN TRANSACTION READ ONLY;
+SET LOCAL statement_timeout = '15s';
+EXPLAIN (ANALYZE, BUFFERS, TIMING OFF)
+WITH matched AS (
+    SELECT na."id" FROM "news_articles" na WHERE na."status" = 'GOOD' AND na."publishedAt" >= (now() AT TIME ZONE 'Asia/Dhaka') - interval '7 days'
+      AND to_tsvector('simple'::regconfig, COALESCE(na."title", '') || ' ' || left(COALESCE(na."content", ''), 100000)) @@ to_tsquery('simple', :'tsq')
+    UNION
+    SELECT na."id" FROM "news_articles" na WHERE na."status" = 'GOOD' AND na."publishedAt" >= (now() AT TIME ZONE 'Asia/Dhaka') - interval '7 days'
+      AND na."title" ILIKE :'likepat'
+    UNION
+    SELECT na."id" FROM "news_articles" na WHERE na."status" = 'GOOD' AND na."publishedAt" >= (now() AT TIME ZONE 'Asia/Dhaka') - interval '7 days'
+      AND EXISTS (SELECT 1 FROM "news_ai_analysis" a WHERE a."articleId" = na."id" AND a."search_tsv" IS NOT NULL
+                  AND a."search_tsv" @@ to_tsquery('simple', :'tsq'))
+),
+cand AS (
+    SELECT na."id", na."sourceId", na."publishedAt", na."title" FROM "news_articles" na
+    WHERE na."id" IN (SELECT "id" FROM matched)
+    ORDER BY na."publishedAt" DESC NULLS LAST, na."id" DESC LIMIT 500
+)
+SELECT c."id", ROUND(((CASE WHEN c."title" ILIKE :'likepat' THEN 1000 ELSE 0 END) + COALESCE(ai.boost, 0))::numeric, 4)::float8 AS score
+FROM cand c
+LEFT JOIN LATERAL (
+    SELECT MAX(ts_rank(a."search_tsv", to_tsquery('simple', :'tsq')) * 100) AS boost
+    FROM "news_ai_analysis" a
+    WHERE a."articleId" = c."id" AND a."search_tsv" IS NOT NULL AND a."search_tsv" @@ to_tsquery('simple', :'tsq')
+) ai ON true
+ORDER BY score DESC, c."publishedAt" DESC NULLS LAST, c."id" DESC;
+ROLLBACK;
+
+\echo '--- O2b shipped 7-day slice, term নির্বাচন (15 s cap, READ ONLY, ROLLBACK)'
+\set term 'নির্বাচন'
+SELECT lower(btrim(regexp_replace(regexp_replace(normalize(:'term', NFKC), '[​-‍﻿]', '', 'g'), '\s+', ' ', 'g'))) AS nterm \gset
+SELECT '%' || :'nterm' || '%' AS likepat,
+       array_to_string(ARRAY(
+           SELECT tok || ':*' FROM (
+               SELECT regexp_replace(w.word, '["''\\()|&!*:<>]', '', 'g') AS tok, w.n
+               FROM regexp_split_to_table(:'nterm', '\s+') WITH ORDINALITY AS w(word, n)
+               WHERE w.word <> '' ORDER BY w.n LIMIT 10
+           ) s WHERE s.tok <> '' ORDER BY s.n), ' | ') AS tsq \gset
+\echo 'to_tsquery input:' :'tsq'
+BEGIN TRANSACTION READ ONLY;
+SET LOCAL statement_timeout = '15s';
+EXPLAIN (ANALYZE, BUFFERS, TIMING OFF)
+WITH matched AS (
+    SELECT na."id" FROM "news_articles" na WHERE na."status" = 'GOOD' AND na."publishedAt" >= (now() AT TIME ZONE 'Asia/Dhaka') - interval '7 days'
+      AND to_tsvector('simple'::regconfig, COALESCE(na."title", '') || ' ' || left(COALESCE(na."content", ''), 100000)) @@ to_tsquery('simple', :'tsq')
+    UNION
+    SELECT na."id" FROM "news_articles" na WHERE na."status" = 'GOOD' AND na."publishedAt" >= (now() AT TIME ZONE 'Asia/Dhaka') - interval '7 days'
+      AND na."title" ILIKE :'likepat'
+    UNION
+    SELECT na."id" FROM "news_articles" na WHERE na."status" = 'GOOD' AND na."publishedAt" >= (now() AT TIME ZONE 'Asia/Dhaka') - interval '7 days'
+      AND EXISTS (SELECT 1 FROM "news_ai_analysis" a WHERE a."articleId" = na."id" AND a."search_tsv" IS NOT NULL
+                  AND a."search_tsv" @@ to_tsquery('simple', :'tsq'))
+),
+cand AS (
+    SELECT na."id", na."sourceId", na."publishedAt", na."title" FROM "news_articles" na
+    WHERE na."id" IN (SELECT "id" FROM matched)
+    ORDER BY na."publishedAt" DESC NULLS LAST, na."id" DESC LIMIT 500
+)
+SELECT c."id", ROUND(((CASE WHEN c."title" ILIKE :'likepat' THEN 1000 ELSE 0 END) + COALESCE(ai.boost, 0))::numeric, 4)::float8 AS score
+FROM cand c
+LEFT JOIN LATERAL (
+    SELECT MAX(ts_rank(a."search_tsv", to_tsquery('simple', :'tsq')) * 100) AS boost
+    FROM "news_ai_analysis" a
+    WHERE a."articleId" = c."id" AND a."search_tsv" IS NOT NULL AND a."search_tsv" @@ to_tsquery('simple', :'tsq')
+) ai ON true
+ORDER BY score DESC, c."publishedAt" DESC NULLS LAST, c."id" DESC;
+ROLLBACK;
 \timing off
 
 \echo '############ done — paste the whole output into docs/performance/backend-baseline.md §15 ############'

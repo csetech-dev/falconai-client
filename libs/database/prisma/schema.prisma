@@ -2830,6 +2830,9 @@ model PostAIAnalysis {
   generationMeta Json? // latency, attempts, finish_reason
 
   @@index([postId])
+  // Hot topics (dashboard/social/hot-topics) with a sentiment filter: the
+  // per-post semi-join probe answers from this index alone.
+  @@index([postId, sentimentLabel], map: "post_ai_analysis_postId_sentimentLabel_idx")
   @@index([lastAnalyzedAt])
   @@index([contentClassification])
   @@map("post_ai_analysis")
