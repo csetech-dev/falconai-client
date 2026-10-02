@@ -4081,6 +4081,11 @@ model AiFieldEdit {
   /// i.e. the analyst accepted the suggestion only partially.
   divergedFromProposal Boolean @default(false)
 
+  /// RESTORE only: history version the value was taken from —
+  /// "edit:<AiFieldEdit.id>", "original:<AiFieldEdit.id>" (that edit's
+  /// valueBefore) or "refine:<AiFieldRefinement.id>".
+  restoredFrom String?
+
   actorId    String?
   actorEmail String?
 
@@ -4433,6 +4438,8 @@ enum AiFeedbackVerdict {
 enum AiFieldEditSource {
   REFINE_SAVE
   DIRECT_SAVE
+  /// The analyst picked an earlier version from the field's history.
+  RESTORE
 }
 
 // ============================================
