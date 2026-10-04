@@ -28,12 +28,52 @@ Commands:
 
 Options:
   app --no-build   Skip docker compose --build
-  ghcr             Pull from GHCR and start app stack (requires .env.app GHCR_* vars)
+  ghcr             git pull the bundle checkout, then pull from GHCR and start the app
+                   stack (requires .env.app GHCR_* vars)
+  ghcr --no-sync   Same, without the git pull (or FALCON_NO_SYNC=1)
 
 Examples:
   make init-storage && $EDITOR .env.storage && make deploy-storage
   make init-app && $EDITOR .env.app && make deploy-app
 EOF
+}
+
+# GHCR deploys run from the client bundle checkout (/opt/falconai-client, a clone
+# of the falconai-client repo). The images come from GHCR, but the deploy scripts,
+# compose files, sizing profiles and SQL come from the bundle, so pull it first.
+# A stale bundle silently deploys old behaviour (e.g. dropping a perf index).
+# Bypass: `make deploy-ghcr-nosync`, `deploy.sh ghcr --no-sync`, or FALCON_NO_SYNC=1.
+sync_bundle_checkout() {
+  if [[ "${FALCON_NO_SYNC:-0}" == "1" ]]; then
+    warn "Bundle sync skipped (no-sync): deploying the bundle as it is on disk."
+    return 0
+  fi
+  if [[ "${FALCON_BUNDLE_SYNCED:-0}" == "1" ]]; then
+    return 0
+  fi
+  require_cmd git
+  if [[ ! -e "${ROOT_DIR}/.git" ]]; then
+    warn "${ROOT_DIR} is not a git checkout — bundle sync skipped (update the bundle by hand)."
+    return 0
+  fi
+
+  local before after
+  before="$(git -C "${ROOT_DIR}" rev-parse HEAD)" || \
+    die "Cannot read git HEAD in ${ROOT_DIR} (owned by another user? run: git config --global --add safe.directory ${ROOT_DIR}). To deploy the bundle as it is: make deploy-ghcr-nosync"
+  log "Syncing bundle: git pull --ff-only in ${ROOT_DIR} (bypass: make deploy-ghcr-nosync)..."
+  if ! git -C "${ROOT_DIR}" pull --ff-only; then
+    die "git pull --ff-only failed in ${ROOT_DIR}. Check: access to the falconai-client repo; the branch tracks origin (git status -sb); local edits to tracked bundle files (git status --short — discard with 'git checkout -- <file>', never .env.*). To deploy the bundle as it is: make deploy-ghcr-nosync"
+  fi
+  after="$(git -C "${ROOT_DIR}" rev-parse HEAD)"
+
+  if [[ "${before}" == "${after}" ]]; then
+    ok "Bundle already up to date (${after:0:9})."
+    return 0
+  fi
+  ok "Bundle updated ${before:0:9} -> ${after:0:9}."
+  # This script and common.sh may have changed: re-run the new version once.
+  export FALCON_BUNDLE_SYNCED=1
+  exec bash "${SCRIPT_DIR}/deploy.sh" "$@"
 }
 
 cmd_status() {
@@ -132,6 +172,10 @@ main() {
       bash "${SCRIPT_DIR}/deploy-app.sh"
       ;;
     ghcr)
+      if [[ "${1:-}" == "--no-sync" ]]; then
+        export FALCON_NO_SYNC=1
+      fi
+      sync_bundle_checkout ghcr "$@"
       export FALCON_DEPLOY_MODE=ghcr
       export BUILD_FLAG=0
       bash "${SCRIPT_DIR}/deploy-app.sh"

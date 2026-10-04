@@ -125,6 +125,26 @@ run_prisma_db_push() {
   fi
 }
 
+# db push drops news_articles_status_published_desc_nl_idx (Prisma cannot
+# express NULLS LAST), so every push must be followed by ONE serial re-apply of
+# scripts/performance/apply-performance-schema.sql. CONCURRENTLY + IF NOT EXISTS:
+# seconds when nothing is missing, never blocks reads/writes. Its post-check
+# exits non-zero naming any missing/INVALID index.
+run_perf_schema() {
+  echo "" >> "$OUTPUT_FILE"
+  if [[ ! -f "$PROJECT_DIR/.env.app" ]]; then
+    warn "[PERF SCHEMA] No .env.app — skipped. Run: bash ./scripts/deploy/db.sh perf-schema"
+    return 0
+  fi
+  log "[PERF SCHEMA] Re-applying performance schema after db push (db.sh perf-schema)..."
+  if bash "$PROJECT_DIR/scripts/deploy/db.sh" perf-schema 2>&1 | tee -a "$OUTPUT_FILE"; then
+    log "[PERF SCHEMA] Performance schema re-applied (all performance indexes valid)"
+  else
+    fail_deployment "performance schema re-apply failed after db push (missing/INVALID index; see output). Fix, then run ONCE: bash ./scripts/deploy/db.sh perf-schema"
+    return 1
+  fi
+}
+
 
 run_pcdn_sync() {
   # Sync config bundle from pcdn before GHCR deploy.
@@ -285,6 +305,16 @@ run_deployment() {
       fi
     fi
 
+    # deploy.sh ghcr git-pulls the bundle checkout first (bypass: FALCON_NO_SYNC=1).
+    # A host fed by pcdn already has its bundle, and a pull on top of pcdn-written
+    # files would fail, so pcdn hosts skip the git sync. The agent runs as root,
+    # so let git operate on a checkout owned by another user.
+    if [[ "${PCDN_SYNC_ON_DEPLOY:-}" == "true" ]]; then
+      export FALCON_NO_SYNC=1
+    else
+      git config --global --add safe.directory "$PROJECT_DIR" 2>&1 | tee -a "$OUTPUT_FILE" || true
+    fi
+
     export FALCON_DEPLOY_MODE=ghcr
     export FALCON_DEPLOY_DIR="${FALCON_DEPLOY_DIR:-$PROJECT_DIR}"
     export BUILD_FLAG=0
@@ -296,8 +326,11 @@ run_deployment() {
       return 1
     fi
 
-    # Schema ships inside the pulled falcon-core image — no host checkout required.
-    run_prisma_db_push || return 1
+    # deploy.sh ghcr already ran `db.sh push` (schema baked into the pulled
+    # falcon-core image) AND the performance schema re-apply, and exits
+    # non-zero if either failed. A second push here used to drop
+    # news_articles_status_published_desc_nl_idx again right after it had
+    # been rebuilt — so there is deliberately no push in this branch.
   else
     mapfile -t COMPOSE_FILE_ARGS < <(compose_args)
     # ---- Step 1: Sync repository to origin/main ----
@@ -352,6 +385,7 @@ run_deployment() {
     fi
 
     run_prisma_db_push || return 1
+    run_perf_schema || return 1
   fi
 
   echo "" >> "$OUTPUT_FILE"

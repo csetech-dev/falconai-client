@@ -275,6 +275,45 @@ prune_docker_artifacts() {
   ok "Docker prune complete."
 }
 
+# Re-apply scripts/performance/apply-performance-schema.sql right after
+# `prisma db push`. db push makes the DB match schema.prisma and DROPS any
+# index it can parse but the schema does not declare — today exactly one:
+# news_articles_status_published_desc_nl_idx ("publishedAt" DESC NULLS LAST,
+# which Prisma cannot express). Expression/partial indexes, the fts function
+# and the AI search_tsv trigger survive the push (Prisma ignores them).
+#
+# Runs ONCE, in the foreground, with no timeout. Every statement is
+# CREATE INDEX CONCURRENTLY IF NOT EXISTS, so it never blocks reads/writes and
+# is a few seconds of catalog checks when nothing is missing; after a drop it
+# rebuilds desc_nl (beta: ~15 s; prod: expect under a few minutes). The app is
+# already up while it runs. The SQL takes a try-lock, so a second concurrent run
+# fails fast instead of deadlocking, and ends with a post-check that exits
+# non-zero naming any missing/INVALID index.
+#
+# Returns non-zero on failure; the caller decides when to fail the deploy.
+# Set SKIP_PERF_SCHEMA=1 to skip (e.g. while an operator is building by hand).
+reapply_performance_schema() {
+  if [[ "${SKIP_PERF_SCHEMA:-0}" == "1" ]]; then
+    warn "SKIP_PERF_SCHEMA=1 — NOT re-applying the performance schema after db push."
+    warn "news_articles_status_published_desc_nl_idx may now be missing; run: bash ./scripts/deploy/db.sh perf-schema"
+    return 0
+  fi
+  local started rc
+  started="$(date +%s)"
+  log "Re-applying performance schema after db push (db.sh perf-schema; CONCURRENTLY, foreground, no timeout)..."
+  log "Progress from another shell: bash ./scripts/deploy/db.sh psql -- -c \"SELECT phase, blocks_done, blocks_total FROM pg_stat_progress_create_index;\""
+  rc=0
+  bash "${ROOT_DIR}/scripts/deploy/db.sh" perf-schema || rc=$?
+  if [[ "${rc}" == "0" ]]; then
+    ok "Performance schema re-applied in $(( $(date +%s) - started ))s (all performance indexes valid)."
+    return 0
+  fi
+  printf '%b[%s] ERROR: %s%b\n' "${RED}" "$(date '+%H:%M:%S')" \
+    "Performance schema re-apply FAILED (exit ${rc}) after db push. A performance index is missing or INVALID — see the psql error above. The app is running but news feeds/search may be slow. Fix: if an index is INVALID, DROP INDEX CONCURRENTLY it, then run ONCE: bash ./scripts/deploy/db.sh perf-schema (docs/performance/RUNBOOK.md §4)." \
+    "${NC}" >&2
+  return "${rc}"
+}
+
 warn_opensearch_host_prereqs() {
   if [[ ! -r /proc/sys/vm/max_map_count ]]; then
     return 0

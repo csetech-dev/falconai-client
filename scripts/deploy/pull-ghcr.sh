@@ -86,4 +86,16 @@ else
   warn "Container ${PRISMA_CONTAINER} not running — skipped Prisma step."
 fi
 
+# db push drops news_articles_status_published_desc_nl_idx (Prisma cannot
+# express NULLS LAST) — put it back straight away, serially. Runs even when the
+# push was skipped or failed: it is idempotent and only adds what is missing.
+# db.sh perf-schema reads POSTGRES_* from .env.app.
+if [[ -f "${ENV_FILE}" ]]; then
+  if ! reapply_performance_schema; then
+    die "GHCR pull deploy finished BUT the performance schema re-apply failed (see the ERROR above). Fix the INVALID/missing index, then run ONCE: bash ./scripts/deploy/db.sh perf-schema"
+  fi
+else
+  warn "No ${ENV_FILE} — skipped performance schema re-apply. Run: bash ./scripts/deploy/db.sh perf-schema"
+fi
+
 ok "GHCR pull deploy complete."

@@ -14,7 +14,7 @@ WireGuard tunnel (REQUIRED â€” encrypts app<->storage; storage ports are no
   Save the "STORAGE host" block to  infra/wireguard/storage/wg0.conf  (storage host)
   Save the "APP host" block to      infra/wireguard/app/wg0.conf      (app host)
   Deploy aborts with instructions if these are missing.
-  Details: docs/WIREGUARD_STORAGE_TUNNEL.md
+  Details: docs/system/WIREGUARD_STORAGE_TUNNEL.md
 
 Storage host:
   cp .env.storage.example .env.storage

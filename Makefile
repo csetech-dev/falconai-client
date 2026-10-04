@@ -1,4 +1,4 @@
-.PHONY: init-storage init-app init-brain deploy-storage deploy-app deploy-brain deploy-ghcr deploy-status deploy-down fix-crlf fix-worker-entrypoints verify-scrapers sizing-check nginx-check clean-docker setup-auto-deploy logs-app logs-storage \
+.PHONY: init-storage init-app init-brain deploy-storage deploy-app deploy-brain deploy-ghcr deploy-ghcr-nosync deploy-status deploy-down fix-crlf fix-worker-entrypoints verify-scrapers sizing-check nginx-check clean-docker setup-auto-deploy logs-app logs-storage \
 	db-push db-push-loss db-generate db-seed db-seed-prompts db-seed-news-prompts db-seed-news-sources db-seed-international-keywords db-seed-international-news-source db-seed-videos db-seed-epaper-sources db-status db-psql \
 	db-exec-push db-exec-push-loss db-exec-generate db-exec-seed db-exec-seed-prompts db-exec-seed-news-prompts db-exec-seed-news-sources db-exec-seed-international-keywords db-exec-seed-international-news-source db-exec-seed-epaper-sources db-exec-seed-videos db-exec-seed-twitter-profiles db-exec-seed-telegram-profiles db-copy-schema \
 	dump-db help
@@ -15,7 +15,8 @@ help:
 	@echo "    make sizing-check     Dry-run FALCON_SIZING_PROFILE: does it fit this host?"
 	@echo "    make nginx-check      Validate the api-gateway and web nginx configs (needs docker)"
 	@echo "    make deploy-app       Start application stack (build from source)"
-	@echo "    make deploy-ghcr      Pull app stack from GHCR (FlareSolverr = public ghcr.io/flaresolverr)"
+	@echo "    make deploy-ghcr      git pull the bundle, then pull app stack from GHCR (FlareSolverr = public ghcr.io/flaresolverr)"
+	@echo "    make deploy-ghcr-nosync  Same, without the bundle git pull"
 	@echo "    make setup-auto-deploy  Install webhook + deploy-agent for CI auto-deploy"
 	@echo "    make fix-crlf         Fix Windows CRLF in .env and shell scripts (Linux client)"
 	@echo "    make fix-worker-entrypoints  Fix worker-fb/worker-x python api.py crash (GHCR)"
@@ -86,6 +87,9 @@ init-brain:
 
 deploy-ghcr:
 	bash scripts/deploy/deploy.sh ghcr
+
+deploy-ghcr-nosync:
+	bash scripts/deploy/deploy.sh ghcr --no-sync
 
 setup-auto-deploy:
 	sudo bash scripts/deploy/setup-auto-deploy.sh

@@ -7,7 +7,18 @@
 -- blocks reads or writes, so waiting is harmless.
 SET lock_timeout = '0';
 SET statement_timeout = '0';
-SELECT pg_advisory_lock(hashtext('falcon-performance-schema'));
+-- One run at a time, enforced with a TRY lock that fails fast. A blocking
+-- pg_advisory_lock() is worse than no lock: the waiting second run sits in an
+-- open transaction, the first run's CREATE INDEX CONCURRENTLY waits for every
+-- older transaction (including that one), the second waits for the first's
+-- lock -> deadlock, and the cancelled build is left INVALID (beta, 2026-10).
+-- The lock is session-level, so it outlives the DO block and is released when
+-- psql disconnects (or by the unlock at the end).
+DO $$ BEGIN
+ IF NOT pg_try_advisory_lock(hashtext('falcon-performance-schema')) THEN
+  RAISE EXCEPTION 'Another perf-schema run holds the falcon-performance-schema lock. Wait for it to finish (SELECT pid, query FROM pg_stat_activity WHERE query ILIKE ''%%CONCURRENTLY%%''), then rerun. Never run two at once.';
+ END IF;
+END $$;
 -- Refuse invalid indexes: IF NOT EXISTS would otherwise silently skip rebuilding them.
 DO $$ BEGIN
  IF EXISTS (SELECT 1 FROM pg_index i JOIN pg_class c ON c.oid=i.indexrelid
@@ -124,4 +135,27 @@ BEGIN
   END IF;
 END;
 $$;
+-- Post-check: every performance object must now exist and be usable. A build
+-- that ended INVALID (or was never created) fails the run with a non-zero exit
+-- naming it, so a deploy that re-applies this file after `prisma db push`
+-- (scripts/deploy/common.sh: reapply_performance_schema) fails loudly.
+DO $$
+DECLARE
+ bad text;
+BEGIN
+ SELECT string_agg(want.name || CASE WHEN c.oid IS NULL THEN ' (missing)' ELSE ' (INVALID)' END, ', ' ORDER BY want.name)
+ INTO bad
+ FROM unnest(ARRAY['keywords_lower_keyword_trgm_idx', 'keywords_lower_keyword_idx', 'news_ai_analysis_trendingKeywords_coalesce_gin_idx', 'news_ai_analysis_topTopics_coalesce_gin_idx', 'news_ai_analysis_summary_trgm_idx', 'news_ai_analysis_what_happened_trgm_idx', 'news_ai_analysis_where_happened_trgm_idx', 'news_ai_analysis_who_involved_trgm_idx', 'news_ai_analysis_between_whom_trgm_idx', 'news_ai_analysis_why_happened_trgm_idx', 'news_ai_analysis_root_cause_trgm_idx', 'news_ai_analysis_what_impact_trgm_idx', 'news_ai_analysis_future_implication_trgm_idx', 'news_ai_analysis_search_tsv_gin_idx', 'news_articles_search_tsv_gin_idx', 'news_articles_category_trgm_idx', 'news_articles_status_published_desc_nl_idx', 'news_articles_fts_expr_idx']) AS want(name)
+ LEFT JOIN pg_namespace n ON n.nspname = current_schema()
+ LEFT JOIN pg_class c ON c.relname = want.name AND c.relnamespace = n.oid
+ LEFT JOIN pg_index i ON i.indexrelid = c.oid
+ WHERE c.oid IS NULL OR NOT i.indisvalid OR NOT i.indisready;
+ IF bad IS NOT NULL THEN
+  RAISE EXCEPTION 'Performance schema incomplete: %. For an INVALID index: DROP INDEX CONCURRENTLY "<name>"; then rerun perf-schema ONCE.', bad;
+ END IF;
+ IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_news_ai_analysis_search_tsv' AND tgrelid = 'news_ai_analysis'::regclass AND tgenabled <> 'D') THEN
+  RAISE EXCEPTION 'Performance schema incomplete: trigger trg_news_ai_analysis_search_tsv missing or disabled.';
+ END IF;
+ RAISE NOTICE 'Performance schema OK: 18 indexes valid, trigger trg_news_ai_analysis_search_tsv enabled.';
+END $$;
 SELECT pg_advisory_unlock(hashtext('falcon-performance-schema'));

@@ -110,10 +110,17 @@ if [[ "${USE_GHCR}" == "1" ]]; then
   "${COMPOSE[@]}" "${COMPOSE_ARGS[@]}" up -d --no-build --remove-orphans --force-recreate "${GHCR_BYTECODE_WORKERS[@]}"
 fi
 
+DB_PUSH_FAILED=0
+PERF_SCHEMA_FAILED=0
 if [[ "${USE_GHCR}" == "1" ]]; then
   log "Applying Prisma schema (one-off container)..."
-  bash "${SCRIPT_DIR}/db.sh" push || \
+  if ! bash "${SCRIPT_DIR}/db.sh" push; then
+    DB_PUSH_FAILED=1
     warn "prisma db push failed — check DATABASE_URL in .env.app and falcon-core logs."
+  fi
+  # db push drops news_articles_status_published_desc_nl_idx (Prisma cannot
+  # express NULLS LAST) — put it back straight away, serially. See common.sh.
+  reapply_performance_schema || PERF_SCHEMA_FAILED=1
 fi
 
 if [[ "${BUILD_FLAG}" == "1" ]]; then
@@ -123,6 +130,18 @@ fi
 if [[ "${USE_GHCR}" == "1" ]]; then
   bash "${SCRIPT_DIR}/verify-scrapers.sh" || \
     warn "Scraper verification failed — run: bash scripts/deploy/verify-scrapers.sh"
+fi
+
+# Both failures are reported only now, so the rest of the deploy (prune,
+# scraper verification, banner) still runs, but the step exits non-zero —
+# the deploy agent / technical panel then shows the deploy as failed.
+if [[ "${DB_PUSH_FAILED}" == "1" || "${PERF_SCHEMA_FAILED}" == "1" ]]; then
+  print_app_banner
+  [[ "${DB_PUSH_FAILED}" == "1" ]] && \
+    warn "prisma db push FAILED — rerun: bash ./scripts/deploy/db.sh push, then ONCE: bash ./scripts/deploy/db.sh perf-schema"
+  [[ "${PERF_SCHEMA_FAILED}" == "1" ]] && \
+    warn "performance schema re-apply FAILED — fix the INVALID/missing index, then run ONCE: bash ./scripts/deploy/db.sh perf-schema"
+  die "Application deployed, but the database step failed (see above)."
 fi
 
 ok "Application deployment complete."
