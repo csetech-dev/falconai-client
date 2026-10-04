@@ -3476,6 +3476,11 @@ model VideoSpeaker {
   // Populated by talkshow_asd_worker; pgvector vector(192), not natively typed by Prisma.
   voiceEmbedding       Unsupported("vector(192)")? @map("voice_embedding")
   voiceEmbeddingSource String?                     @map("voice_embedding_source")
+  /// The global voice profile this appearance was bound to when a reviewer
+  /// verified it (see VideoAiService.confirmSpeaker). Null until then — the
+  /// worker matches on embeddings and does not write this column.
+  voiceProfileId       String?                     @map("voice_profile_id")
+  voiceProfile         SpeakerVoiceProfile?        @relation(fields: [voiceProfileId], references: [id], onDelete: SetNull)
   createdAt            DateTime                    @default(now()) @map("created_at")
 
   images   VideoSpeakerImage[]
@@ -3484,21 +3489,37 @@ model VideoSpeaker {
   @@unique([videoId, speakerKey])
   @@index([videoId])
   @@index([identityCampaignId])
+  @@index([voiceProfileId], map: "video_speakers_voice_profile_id_idx")
   @@map("video_speakers")
 }
 
 // Cross-video speaker voice profiles for matching speakers across different
-// videos via cosine similarity (the pgvector `<=>` operator). Standalone — no
-// FK relations. The ivfflat index on voice_embedding (vector_cosine_ops,
-// lists=100) cannot be expressed in Prisma and lives only in the migration SQL
-// (see prisma/migrations/<voice-profiles>/migration.sql).
+// videos via cosine similarity (the pgvector `<=>` operator). The worker
+// creates and matches these; a reviewer's verification of any appearance
+// writes the identity columns, which is what lets the next video resolve the
+// same voice to a name. The hnsw index on voice_embedding (vector_cosine_ops)
+// cannot be expressed in Prisma and lives only in the migration SQL (see
+// prisma/migrations/20261002000000_voice_profile_verify/migration.sql), so
+// `prisma db push` drops it as drift; re-create it after a push.
 model SpeakerVoiceProfile {
-  id             String                     @id // text PK, assigned by the worker
-  displayName    String                     @map("display_name")
-  voiceEmbedding Unsupported("vector(192)") @map("voice_embedding")
-  sampleCount    Int                        @default(1) @map("sample_count")
-  lastSeenAt     DateTime                   @default(now()) @map("last_seen_at")
-  createdAt      DateTime                   @default(now()) @map("created_at")
+  id                 String                     @id // text PK, assigned by the worker
+  displayName        String                     @map("display_name")
+  voiceEmbedding     Unsupported("vector(192)") @map("voice_embedding")
+  sampleCount        Int                        @default(1) @map("sample_count")
+  lastSeenAt         DateTime                   @default(now()) @map("last_seen_at")
+  createdAt          DateTime                   @default(now()) @map("created_at")
+  /// Identity a reviewer confirmed for this voice. Mirrors the VideoSpeaker
+  /// columns of the same names; null means the profile is still anonymous
+  /// (`displayName` is then the worker's generic "person_N").
+  verifiedName       String?                    @map("verified_name")
+  identityCampaignId String?                    @map("identity_campaign_id")
+  organization       String?
+  photoUrl           String?                    @map("photo_url")
+  verifiedAt         DateTime?                  @map("verified_at")
+  /// Soft reference to users.id, matching VideoSpeaker.verifiedBy.
+  verifiedBy         String?                    @map("verified_by")
+
+  speakers VideoSpeaker[]
 
   @@map("speaker_voice_profiles")
 }
