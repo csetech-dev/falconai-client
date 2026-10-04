@@ -3481,15 +3481,17 @@ model VideoSpeaker {
   // Populated by talkshow_asd_worker; pgvector vector(192), not natively typed by Prisma.
   voiceEmbedding       Unsupported("vector(192)")? @map("voice_embedding")
   voiceEmbeddingSource String?                     @map("voice_embedding_source")
-  /// The global voice profile this appearance was bound to when a reviewer
-  /// verified it (see VideoAiService.confirmSpeaker). Null until then — the
-  /// worker matches on embeddings and does not write this column.
+  /// The global voice profile this appearance belongs to. The talk-show
+  /// worker sets it when it embeds the voice (nearest profile within its
+  /// threshold, or a new anonymous one); a reviewer's verification may
+  /// re-bind it (see VideoAiService.confirmSpeaker). Null before embedding.
   voiceProfileId       String?                     @map("voice_profile_id")
   voiceProfile         SpeakerVoiceProfile?        @relation(fields: [voiceProfileId], references: [id], onDelete: SetNull)
   createdAt            DateTime                    @default(now()) @map("created_at")
 
-  images   VideoSpeakerImage[]
-  segments VideoSegment[]
+  images             VideoSpeakerImage[]
+  segments           VideoSegment[]
+  identityRejections SpeakerIdentityRejection[]
 
   @@unique([videoId, speakerKey])
   @@index([videoId])
@@ -3527,6 +3529,24 @@ model SpeakerVoiceProfile {
   speakers VideoSpeaker[]
 
   @@map("speaker_voice_profiles")
+}
+
+/// A reviewer's "not this person" on an appearance the talk-show archive
+/// suggested by voice, so the suggestion is not offered again. Keyed to the
+/// campaign the suggestion was made for; any member of that campaign's
+/// identity cluster counts when the archive filters suggestions.
+model SpeakerIdentityRejection {
+  id                 String       @id @default(cuid())
+  speakerId          String       @map("speaker_id")
+  speaker            VideoSpeaker @relation(fields: [speakerId], references: [id], onDelete: Cascade)
+  identityCampaignId String       @map("identity_campaign_id")
+  /// Soft reference to users.id, like VideoSpeaker.verifiedBy.
+  rejectedBy         String?      @map("rejected_by")
+  createdAt          DateTime     @default(now()) @map("created_at")
+
+  @@unique([speakerId, identityCampaignId], map: "speaker_identity_rejections_speaker_identity_key")
+  @@index([identityCampaignId], map: "speaker_identity_rejections_identity_campaign_id_idx")
+  @@map("speaker_identity_rejections")
 }
 
 model VideoSpeakerImage {
