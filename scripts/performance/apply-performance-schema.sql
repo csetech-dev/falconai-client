@@ -23,7 +23,7 @@ END $$;
 DO $$ BEGIN
  IF EXISTS (SELECT 1 FROM pg_index i JOIN pg_class c ON c.oid=i.indexrelid
  JOIN pg_namespace n ON n.oid=c.relnamespace
- WHERE n.nspname=current_schema() AND NOT i.indisvalid AND c.relname IN ('keywords_lower_keyword_trgm_idx', 'keywords_lower_keyword_idx', 'news_ai_analysis_trendingKeywords_coalesce_gin_idx', 'news_ai_analysis_topTopics_coalesce_gin_idx', 'news_ai_analysis_summary_trgm_idx', 'news_ai_analysis_what_happened_trgm_idx', 'news_ai_analysis_where_happened_trgm_idx', 'news_ai_analysis_who_involved_trgm_idx', 'news_ai_analysis_between_whom_trgm_idx', 'news_ai_analysis_why_happened_trgm_idx', 'news_ai_analysis_root_cause_trgm_idx', 'news_ai_analysis_what_impact_trgm_idx', 'news_ai_analysis_future_implication_trgm_idx', 'news_ai_analysis_search_tsv_gin_idx', 'news_articles_search_tsv_gin_idx', 'news_articles_category_trgm_idx', 'news_articles_status_published_desc_nl_idx', 'news_articles_fts_expr_idx'))
+ WHERE n.nspname=current_schema() AND NOT i.indisvalid AND c.relname IN ('keywords_lower_keyword_trgm_idx', 'keywords_lower_keyword_idx', 'news_ai_analysis_trendingKeywords_coalesce_gin_idx', 'news_ai_analysis_topTopics_coalesce_gin_idx', 'news_ai_analysis_summary_trgm_idx', 'news_ai_analysis_what_happened_trgm_idx', 'news_ai_analysis_where_happened_trgm_idx', 'news_ai_analysis_who_involved_trgm_idx', 'news_ai_analysis_between_whom_trgm_idx', 'news_ai_analysis_why_happened_trgm_idx', 'news_ai_analysis_root_cause_trgm_idx', 'news_ai_analysis_what_impact_trgm_idx', 'news_ai_analysis_future_implication_trgm_idx', 'news_ai_analysis_search_tsv_gin_idx', 'news_articles_search_tsv_gin_idx', 'news_articles_category_trgm_idx', 'news_articles_status_published_desc_nl_idx', 'news_articles_fts_expr_idx', 'news_articles_ai_search_tsv_gin_idx'))
  THEN RAISE EXCEPTION 'Invalid performance index found. Drop ONLY the invalid named index CONCURRENTLY, then rerun.'; END IF;
 END $$;
 CREATE INDEX CONCURRENTLY IF NOT EXISTS "keywords_lower_keyword_trgm_idx" ON "keywords" USING GIN (LOWER("keyword") gin_trgm_ops);
@@ -135,6 +135,139 @@ BEGIN
   END IF;
 END;
 $$;
+
+-- News text search, AI branch (perf/news-search-common-words, beta 2026-10-04).
+-- Matching an article through news_ai_analysis.search_tsv meant a bitmap heap
+-- scan of the wide AI table (~13 KB rows, 1.9 GB on beta) just to read
+-- articleId: ঢাকা (41k matching analyses) took over 15 s cold. So every
+-- article now carries the combined vector of ALL its analyses in
+-- news_articles.ai_search_tsv (declared in schema.prisma, so `db push` keeps
+-- it), kept up to date by the triggers below, backfilled by
+-- scripts/performance/backfill-news-ai-search-tsv.sql, and GIN-indexed, so the
+-- search reads only news_articles.
+--
+-- The combined value: the non-NULL analysis vectors in id order, joined with
+-- a one-lexeme separator (' ', a single space) between them; NULL when the
+-- article has no analysis with a vector. With exactly one such analysis it IS
+-- that analysis's vector. Why the separator: the search's to_tsquery turns a
+-- compound word (covid-19) into a phrase ('covid':* <-> '-19':*), and plain
+-- concatenation would let a phrase match ACROSS two analyses, which the old
+-- per-analysis EXISTS never did. No query lexeme can match the separator
+-- (to_tsquery never yields a lexeme starting with a space), so a match of the
+-- combined vector is exactly a match of some single analysis (argument in
+-- news-search-progressive.ts). A combined vector that would come near the
+-- 1 MB tsvector limit falls back to the union of the position-free (strip)
+-- vectors: same lexemes, phrases then match leniently.
+--
+-- The column comes from `db push`. Without it, stop here (the indexes above
+-- are built; rerun perf-schema after the push): no trigger may exist that
+-- writes a column that is not there.
+DO $$ BEGIN
+ IF NOT EXISTS (SELECT 1 FROM pg_attribute
+                 WHERE attrelid = 'news_articles'::regclass AND attname = 'ai_search_tsv' AND NOT attisdropped) THEN
+  RAISE EXCEPTION 'news_articles.ai_search_tsv is missing: run prisma db push with the current schema.prisma first, then perf-schema again.';
+ END IF;
+END $$;
+
+-- VOLATILE on purpose: in READ COMMITTED each query inside takes a fresh
+-- snapshot, so a caller that has just locked the article row sees every
+-- analysis committed before it got the lock (see the trigger below).
+CREATE OR REPLACE FUNCTION news_articles_ai_search_tsv_of(p_article_id text) RETURNS tsvector
+LANGUAGE plpgsql VOLATILE AS $$
+DECLARE
+  acc tsvector;
+  v tsvector;
+  stripped boolean := false;
+BEGIN
+  -- No EXCEPTION block: it would open a subtransaction per call, and the
+  -- backfill calls this ~1000 times per transaction (subxid overflow slows
+  -- every other session). The size is checked before concatenating instead
+  -- (pg_column_size of a computed tsvector is its uncompressed size).
+  FOR v IN SELECT a.search_tsv FROM news_ai_analysis a
+            WHERE a."articleId" = p_article_id AND a.search_tsv IS NOT NULL
+            ORDER BY a.id LOOP
+    IF acc IS NULL THEN
+      acc := v;
+    ELSIF NOT stripped AND pg_column_size(acc) + pg_column_size(v || ''::tsvector) < 900000 THEN
+      acc := acc || $sep$' ':1$sep$::tsvector || v;
+    ELSE
+      stripped := true;
+      acc := strip(acc) || strip(v);
+    END IF;
+  END LOOP;
+  RETURN acc;
+END;
+$$;
+
+-- Recompute the article(s) an analysis write touches. Locks the article row
+-- first (FOR NO KEY UPDATE, compatible with the FK's KEY SHARE) so two
+-- concurrent analysis writes for one article serialise and the second sees
+-- the first. Writes only when the value changes. It updates news_articles,
+-- never news_ai_analysis, so it cannot re-fire the analysis triggers.
+CREATE OR REPLACE FUNCTION news_ai_analysis_sync_article_tsv() RETURNS trigger
+LANGUAGE plpgsql AS $$
+DECLARE
+  ids text[];
+  aid text;
+BEGIN
+  -- A rollback to an image whose schema lacks the column drops it (its
+  -- `db push --accept-data-loss`): then do nothing rather than fail every AI
+  -- write. (One syscache lookup; the column comes back empty, without the
+  -- backfill marker, so the app keeps the AI-table path until a rerun.)
+  IF NOT EXISTS (SELECT 1 FROM pg_attribute
+                  WHERE attrelid = 'news_articles'::regclass AND attname = 'ai_search_tsv' AND NOT attisdropped) THEN
+    RETURN NULL;
+  END IF;
+  IF TG_OP = 'INSERT' THEN
+    ids := ARRAY[NEW."articleId"];
+  ELSIF TG_OP = 'DELETE' THEN
+    ids := ARRAY[OLD."articleId"];
+  ELSIF OLD."articleId" IS DISTINCT FROM NEW."articleId" THEN
+    ids := ARRAY[OLD."articleId", NEW."articleId"];
+  ELSE
+    ids := ARRAY[NEW."articleId"];
+  END IF;
+  FOREACH aid IN ARRAY ids LOOP
+    CONTINUE WHEN aid IS NULL;
+    PERFORM 1 FROM news_articles WHERE id = aid FOR NO KEY UPDATE;
+    UPDATE news_articles na
+       SET ai_search_tsv = c.v
+      FROM (SELECT news_articles_ai_search_tsv_of(aid) AS v) c
+     WHERE na.id = aid AND na.ai_search_tsv IS DISTINCT FROM c.v;
+  END LOOP;
+  RETURN NULL;
+END;
+$$;
+
+-- Three triggers so the WHEN clauses skip the call when nothing that feeds
+-- the combined vector changed. AFTER UPDATE (not UPDATE OF search_tsv): the
+-- AI pipeline updates other columns and the BEFORE trigger above rewrites
+-- search_tsv, which UPDATE OF would not see.
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_news_ai_analysis_article_tsv_ins' AND tgrelid = 'news_ai_analysis'::regclass) THEN
+    CREATE TRIGGER trg_news_ai_analysis_article_tsv_ins
+    AFTER INSERT ON news_ai_analysis
+    FOR EACH ROW WHEN (NEW."articleId" IS NOT NULL AND NEW.search_tsv IS NOT NULL)
+    EXECUTE FUNCTION news_ai_analysis_sync_article_tsv();
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_news_ai_analysis_article_tsv_upd' AND tgrelid = 'news_ai_analysis'::regclass) THEN
+    CREATE TRIGGER trg_news_ai_analysis_article_tsv_upd
+    AFTER UPDATE ON news_ai_analysis
+    FOR EACH ROW WHEN (OLD.search_tsv IS DISTINCT FROM NEW.search_tsv OR OLD."articleId" IS DISTINCT FROM NEW."articleId")
+    EXECUTE FUNCTION news_ai_analysis_sync_article_tsv();
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_news_ai_analysis_article_tsv_del' AND tgrelid = 'news_ai_analysis'::regclass) THEN
+    CREATE TRIGGER trg_news_ai_analysis_article_tsv_del
+    AFTER DELETE ON news_ai_analysis
+    FOR EACH ROW WHEN (OLD."articleId" IS NOT NULL AND OLD.search_tsv IS NOT NULL)
+    EXECUTE FUNCTION news_ai_analysis_sync_article_tsv();
+  END IF;
+END;
+$$;
+
+CREATE INDEX CONCURRENTLY IF NOT EXISTS "news_articles_ai_search_tsv_gin_idx" ON "news_articles" USING GIN ("ai_search_tsv") WHERE "ai_search_tsv" IS NOT NULL;
+
 -- Post-check: every performance object must now exist and be usable. A build
 -- that ended INVALID (or was never created) fails the run with a non-zero exit
 -- naming it, so a deploy that re-applies this file after `prisma db push`
@@ -145,7 +278,7 @@ DECLARE
 BEGIN
  SELECT string_agg(want.name || CASE WHEN c.oid IS NULL THEN ' (missing)' ELSE ' (INVALID)' END, ', ' ORDER BY want.name)
  INTO bad
- FROM unnest(ARRAY['keywords_lower_keyword_trgm_idx', 'keywords_lower_keyword_idx', 'news_ai_analysis_trendingKeywords_coalesce_gin_idx', 'news_ai_analysis_topTopics_coalesce_gin_idx', 'news_ai_analysis_summary_trgm_idx', 'news_ai_analysis_what_happened_trgm_idx', 'news_ai_analysis_where_happened_trgm_idx', 'news_ai_analysis_who_involved_trgm_idx', 'news_ai_analysis_between_whom_trgm_idx', 'news_ai_analysis_why_happened_trgm_idx', 'news_ai_analysis_root_cause_trgm_idx', 'news_ai_analysis_what_impact_trgm_idx', 'news_ai_analysis_future_implication_trgm_idx', 'news_ai_analysis_search_tsv_gin_idx', 'news_articles_search_tsv_gin_idx', 'news_articles_category_trgm_idx', 'news_articles_status_published_desc_nl_idx', 'news_articles_fts_expr_idx']) AS want(name)
+ FROM unnest(ARRAY['keywords_lower_keyword_trgm_idx', 'keywords_lower_keyword_idx', 'news_ai_analysis_trendingKeywords_coalesce_gin_idx', 'news_ai_analysis_topTopics_coalesce_gin_idx', 'news_ai_analysis_summary_trgm_idx', 'news_ai_analysis_what_happened_trgm_idx', 'news_ai_analysis_where_happened_trgm_idx', 'news_ai_analysis_who_involved_trgm_idx', 'news_ai_analysis_between_whom_trgm_idx', 'news_ai_analysis_why_happened_trgm_idx', 'news_ai_analysis_root_cause_trgm_idx', 'news_ai_analysis_what_impact_trgm_idx', 'news_ai_analysis_future_implication_trgm_idx', 'news_ai_analysis_search_tsv_gin_idx', 'news_articles_search_tsv_gin_idx', 'news_articles_category_trgm_idx', 'news_articles_status_published_desc_nl_idx', 'news_articles_fts_expr_idx', 'news_articles_ai_search_tsv_gin_idx']) AS want(name)
  LEFT JOIN pg_namespace n ON n.nspname = current_schema()
  LEFT JOIN pg_class c ON c.relname = want.name AND c.relnamespace = n.oid
  LEFT JOIN pg_index i ON i.indexrelid = c.oid
@@ -156,6 +289,10 @@ BEGIN
  IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_news_ai_analysis_search_tsv' AND tgrelid = 'news_ai_analysis'::regclass AND tgenabled <> 'D') THEN
   RAISE EXCEPTION 'Performance schema incomplete: trigger trg_news_ai_analysis_search_tsv missing or disabled.';
  END IF;
- RAISE NOTICE 'Performance schema OK: 18 indexes valid, trigger trg_news_ai_analysis_search_tsv enabled.';
+ IF (SELECT count(*) FROM pg_trigger WHERE tgrelid = 'news_ai_analysis'::regclass AND tgenabled <> 'D'
+      AND tgname IN ('trg_news_ai_analysis_article_tsv_ins', 'trg_news_ai_analysis_article_tsv_upd', 'trg_news_ai_analysis_article_tsv_del')) <> 3 THEN
+  RAISE EXCEPTION 'Performance schema incomplete: a trg_news_ai_analysis_article_tsv_* trigger (ins/upd/del) is missing or disabled.';
+ END IF;
+ RAISE NOTICE 'Performance schema OK: 19 indexes valid, triggers trg_news_ai_analysis_search_tsv and trg_news_ai_analysis_article_tsv_{ins,upd,del} enabled.';
 END $$;
 SELECT pg_advisory_unlock(hashtext('falcon-performance-schema'));

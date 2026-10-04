@@ -73,6 +73,13 @@
 --      window, and the plan of a candidate 7-day slice query for election /
 --      নির্বাচন (15 s cap each). Alone:
 --        { echo "SET default_transaction_read_only = on;"; sed -n '/############ N\./,/############ done/p' scripts/performance/diagnose-search.sql; } | bash ./scripts/deploy/db.sh psql -- -f -
+--   Q. /news?search= on beta (2026-10-04): the slice statements as the app
+--      sends them (Prisma prepared statements), GENERIC vs CUSTOM plan, the
+--      deployed shape vs the per-branch top-500 shape, ঢাকা and নির্বাচন,
+--      plus a work_mem check and the degraded 24 h read; Q6-Q8 the
+--      news_articles.ai_search_tsv shape (readiness, coverage, plans). 15 s cap each,
+--      READ ONLY + ROLLBACK, prepared statements DEALLOCATEd. Alone:
+--        { echo "SET default_transaction_read_only = on;"; sed -n '/############ Q\./,/############ done/p' scripts/performance/diagnose-search.sql; } | bash ./scripts/deploy/db.sh psql -- -f -
 -- Replace nothing: the terms are ঢাকা (Bangla) and election (English).
 -- ============================================================================
 \set ON_ERROR_STOP off
@@ -3111,5 +3118,393 @@ LEFT JOIN LATERAL (
 ORDER BY score DESC, c."publishedAt" DESC NULLS LAST, c."id" DESC;
 ROLLBACK;
 \timing off
+
+-- ---------------------------------------------------------------------------
+-- Q. /news?search=<Bangla word> returns 0 rows, partial, after 4-7 s on beta
+--    (2026-10-04), while the same 7-day slice run as literal SQL in psql
+--    (section O) takes 205-336 ms. The app runs the slice through Prisma
+--    $queryRaw: a NAMED PREPARED STATEMENT cached per connection, every value
+--    a bound parameter (the slice bound three times, the tsquery, the ILIKE
+--    pattern, even the LIMIT). After five executions PostgreSQL may switch to
+--    a GENERIC plan built without any of those values, and every one-word
+--    search shares that one statement text. This section runs the statements
+--    EXACTLY as the app sends them (the text below is generated from
+--    buildNewsSearchSql, placeholders and all) as prepared statements:
+--  Q1 server settings that shape the plans (work_mem, plan_cache_mode, ctype)
+--     and what the app binds for each term (tsquery, trigrams).
+--  Q2 the currently DEPLOYED shape (one UNION, cap after it), 7-day slice,
+--     ঢাকা and নির্বাচন: GENERIC plan (what a reused Prisma statement runs)
+--     vs CUSTOM plan (what psql with literals runs).
+--  Q3 the NEW shape (perf/news-search-common-words: each branch its own
+--     newest-500, and the app now forces a custom plan per transaction):
+--     the same two terms, generic vs custom.
+--  Q4 the NEW shape, ঢাকা, custom plan with work_mem = 64MB: if Q3 shows
+--     "Heap Blocks: ... lossy=" and "Rows Removed by Index Recheck" on the
+--     body branch, a lossy bitmap re-tokenises bodies; compare.
+--  Q5 the degraded read the app now serves when a slice still runs out of
+--     budget (titles + AI analyses, newest 24 h, no whole-table index), ঢাকা.
+--  Q6 news_articles.ai_search_tsv (2026-10-05): readiness (column, index,
+--     triggers, the backfill marker the app waits for) and coverage (GOOD
+--     articles with an AI vector whose ai_search_tsv is NULL; how many have
+--     several analyses, the only ones whose AI rank can differ).
+--  Q7 the AI-COLUMN shape (body OR ai_search_tsv in one branch, scoring from
+--     the column, no news_ai_analysis read): ঢাকা and নির্বাচন, custom vs
+--     generic. Expect a BitmapOr of news_articles_fts_expr_idx and
+--     news_articles_ai_search_tsv_gin_idx and no news_ai_analysis node.
+--  Q8 the degraded 24 h read in the AI-COLUMN shape.
+--  Read-only: every EXPLAIN runs in its own READ ONLY transaction with a 15 s
+--  statement_timeout and ends in ROLLBACK; the prepared statements are
+--  DEALLOCATEd at the end. Expect the cause to show as: GENERIC well over 4 s
+--  (or the 15 s cap) and CUSTOM well under 1 s. Alone:
+--    { echo "SET default_transaction_read_only = on;"; sed -n '/############ Q\./,/############ done/p' scripts/performance/diagnose-search.sql; } | bash ./scripts/deploy/db.sh psql -- -f -
+-- ---------------------------------------------------------------------------
+\echo '############ Q. news text search: prepared statements, GENERIC vs CUSTOM plan, old vs new shape (ঢাকা, নির্বাচন) ############'
+SET statement_timeout = '60s';
+SET lock_timeout = '2s';
+SET application_name = 'falcon-diagnose-news-search-plans';
+\timing on
+
+\echo '--- Q1a settings that shape the plans'
+SELECT version(), current_setting('work_mem') AS work_mem, current_setting('plan_cache_mode') AS plan_cache_mode,
+       current_setting('lc_ctype') AS lc_ctype, current_setting('TimeZone') AS timezone,
+       current_setting('random_page_cost') AS random_page_cost, current_setting('effective_cache_size') AS effective_cache_size;
+\echo '--- Q1b per-role / per-database overrides (the app role may differ from this session)'
+SELECT COALESCE(r.rolname, '(all roles)') AS role, COALESCE(d.datname, '(all dbs)') AS db, s.setconfig
+FROM pg_db_role_setting s
+LEFT JOIN pg_roles r ON r.oid = s.setrole
+LEFT JOIN pg_database d ON d.oid = s.setdatabase;
+\echo '--- Q1c what the app binds: tsquery and trigrams per term (show_trgm needs pg_trgm; an error there is harmless)'
+SELECT t.term, to_tsquery('simple', t.term || ':*')::text AS tsquery, '%' || t.term || '%' AS ilike_pattern
+FROM (VALUES ('ঢাকা'), ('নির্বাচন'), ('election')) AS t(term);
+SELECT t.term, show_trgm(t.term) AS trigrams FROM (VALUES ('ঢাকা'), ('নির্বাচন'), ('election')) AS t(term);
+
+-- The slice bound: the Dhaka wall clock 7 days back (the app rounds it to its slice step; immaterial here).
+SELECT (date_trunc('hour', (now() AT TIME ZONE 'Asia/Dhaka') - interval '7 days'))::text AS q_from,
+       (date_trunc('hour', (now() AT TIME ZONE 'Asia/Dhaka') - interval '24 hours'))::text AS q_from24 \gset
+\echo 'slice from:' :'q_from' ' degraded window from:' :'q_from24'
+
+-- Deployed shape (before perf/news-search-common-words), verbatim from the app.
+PREPARE q_old AS
+    WITH matched AS (
+        SELECT na."id" FROM "news_articles" na WHERE na."status" = 'GOOD' AND na."publishedAt" >= $1 AND news_articles_fts_document(na."title", na."content") @@ to_tsquery('simple', $2)
+        UNION
+        SELECT na."id" FROM "news_articles" na WHERE na."status" = 'GOOD' AND na."publishedAt" >= $3 AND na."title" ILIKE $4
+        UNION
+        SELECT na."id" FROM "news_articles" na WHERE na."status" = 'GOOD' AND na."publishedAt" >= $5 AND EXISTS (
+            SELECT 1 FROM "news_ai_analysis" a
+            WHERE a."articleId" = na."id"
+              AND a."search_tsv" IS NOT NULL
+              AND a."search_tsv" @@ to_tsquery('simple', $6)
+        )
+    ),
+    cand AS (
+        SELECT na."id", na."sourceId", na."publishedAt", na."title"
+        FROM "news_articles" na
+        WHERE na."id" IN (SELECT "id" FROM matched)
+        ORDER BY na."publishedAt" DESC NULLS LAST, na."id" DESC
+        LIMIT $7
+    )
+    SELECT c."id", c."sourceId", c."publishedAt",
+        ROUND((
+            (CASE WHEN c."title" ILIKE $8 THEN 1000 ELSE 0 END)
+            + 0
+            + (CASE WHEN c."title" ILIKE $9 THEN 300 ELSE 0 END)
+            + COALESCE(ai.boost, 0)
+        )::numeric, 4)::float8 AS "score"
+    FROM cand c
+    LEFT JOIN LATERAL (
+            SELECT MAX(
+                ts_rank(a."search_tsv", to_tsquery('simple', $10)) * 100
+                + (CASE WHEN a."search_tsv" @@ to_tsquery('simple', $11) THEN 500 ELSE 0 END)
+            ) AS boost
+            FROM "news_ai_analysis" a
+            WHERE a."articleId" = c."id"
+              AND a."search_tsv" IS NOT NULL
+              AND a."search_tsv" @@ to_tsquery('simple', $12)
+        ) ai ON true
+    ORDER BY "score" DESC, c."publishedAt" DESC NULLS LAST, c."id" DESC;
+
+-- New shape, verbatim from the app.
+PREPARE q_new AS
+    WITH matched AS (
+        (SELECT na."id", na."sourceId", na."publishedAt", na."title"
+            FROM "news_articles" na
+            WHERE na."status" = 'GOOD' AND na."publishedAt" >= $1 AND news_articles_fts_document(na."title", na."content") @@ to_tsquery('simple', $2)
+            ORDER BY na."publishedAt" DESC NULLS LAST, na."id" DESC
+            LIMIT $3)
+        UNION
+        (SELECT na."id", na."sourceId", na."publishedAt", na."title"
+            FROM "news_articles" na
+            WHERE na."status" = 'GOOD' AND na."publishedAt" >= $4 AND na."title" ILIKE $5
+            ORDER BY na."publishedAt" DESC NULLS LAST, na."id" DESC
+            LIMIT $6)
+        UNION
+        (SELECT na."id", na."sourceId", na."publishedAt", na."title"
+            FROM "news_articles" na
+            WHERE na."status" = 'GOOD' AND na."publishedAt" >= $7 AND EXISTS (
+                SELECT 1 FROM "news_ai_analysis" a
+                WHERE a."articleId" = na."id"
+                  AND a."search_tsv" IS NOT NULL
+                  AND a."search_tsv" @@ to_tsquery('simple', $8)
+            )
+            ORDER BY na."publishedAt" DESC NULLS LAST, na."id" DESC
+            LIMIT $9)
+    ),
+    cand AS (
+        SELECT m."id", m."sourceId", m."publishedAt", m."title"
+        FROM matched m
+        ORDER BY m."publishedAt" DESC NULLS LAST, m."id" DESC
+        LIMIT $10
+    )
+    SELECT c."id", c."sourceId", c."publishedAt",
+        ROUND((
+            (CASE WHEN c."title" ILIKE $11 THEN 1000 ELSE 0 END)
+            + 0
+            + (CASE WHEN c."title" ILIKE $12 THEN 300 ELSE 0 END)
+            + COALESCE(ai.boost, 0)
+        )::numeric, 4)::float8 AS "score"
+    FROM cand c
+    LEFT JOIN LATERAL (
+            SELECT MAX(
+                ts_rank(a."search_tsv", to_tsquery('simple', $13)) * 100
+                + (CASE WHEN a."search_tsv" @@ to_tsquery('simple', $14) THEN 500 ELSE 0 END)
+            ) AS boost
+            FROM "news_ai_analysis" a
+            WHERE a."articleId" = c."id"
+              AND a."search_tsv" IS NOT NULL
+              AND a."search_tsv" @@ to_tsquery('simple', $15)
+        ) ai ON true
+    ORDER BY "score" DESC, c."publishedAt" DESC NULLS LAST, c."id" DESC;
+
+-- Degraded read, verbatim from the app.
+PREPARE q_fallback AS
+    WITH cand AS (
+        SELECT na."id", na."sourceId", na."publishedAt", na."title"
+        FROM "news_articles" na
+        WHERE na."status" = 'GOOD' AND na."publishedAt" >= $1 AND ((na."title" || '') ILIKE $2 OR EXISTS (
+            SELECT 1 FROM "news_ai_analysis" a
+            WHERE a."articleId" = na."id"
+              AND a."search_tsv" IS NOT NULL
+              AND a."search_tsv" @@ to_tsquery('simple', $3)
+            OFFSET 0
+        ))
+        ORDER BY na."publishedAt" DESC NULLS LAST, na."id" DESC
+        LIMIT $4
+    )
+    SELECT c."id", c."sourceId", c."publishedAt",
+        ROUND((
+            (CASE WHEN c."title" ILIKE $5 THEN 1000 ELSE 0 END)
+            + 0
+            + (CASE WHEN c."title" ILIKE $6 THEN 300 ELSE 0 END)
+            + COALESCE(ai.boost, 0)
+        )::numeric, 4)::float8 AS "score"
+    FROM cand c
+    LEFT JOIN LATERAL (
+            SELECT MAX(
+                ts_rank(a."search_tsv", to_tsquery('simple', $7)) * 100
+                + (CASE WHEN a."search_tsv" @@ to_tsquery('simple', $8) THEN 500 ELSE 0 END)
+            ) AS boost
+            FROM "news_ai_analysis" a
+            WHERE a."articleId" = c."id"
+              AND a."search_tsv" IS NOT NULL
+              AND a."search_tsv" @@ to_tsquery('simple', $9)
+        ) ai ON true
+    ORDER BY "score" DESC, c."publishedAt" DESC NULLS LAST, c."id" DESC;
+
+\echo '--- Q2a DEPLOYED shape, ঢাকা, GENERIC plan (15 s cap, READ ONLY, ROLLBACK)'
+BEGIN TRANSACTION READ ONLY;
+SET LOCAL statement_timeout = '15s';
+SET LOCAL plan_cache_mode = force_generic_plan;
+EXPLAIN (ANALYZE, BUFFERS) EXECUTE q_old(:'q_from', 'ঢাকা:*', :'q_from', '%ঢাকা%', :'q_from', 'ঢাকা:*', 500, '%ঢাকা%', '%ঢাকা%', 'ঢাকা:*', 'ঢাকা:*', 'ঢাকা:*');
+ROLLBACK;
+\echo '--- Q2b DEPLOYED shape, ঢাকা, CUSTOM plan (15 s cap, READ ONLY, ROLLBACK)'
+BEGIN TRANSACTION READ ONLY;
+SET LOCAL statement_timeout = '15s';
+SET LOCAL plan_cache_mode = force_custom_plan;
+EXPLAIN (ANALYZE, BUFFERS) EXECUTE q_old(:'q_from', 'ঢাকা:*', :'q_from', '%ঢাকা%', :'q_from', 'ঢাকা:*', 500, '%ঢাকা%', '%ঢাকা%', 'ঢাকা:*', 'ঢাকা:*', 'ঢাকা:*');
+ROLLBACK;
+\echo '--- Q2c DEPLOYED shape, নির্বাচন, GENERIC plan (15 s cap, READ ONLY, ROLLBACK)'
+BEGIN TRANSACTION READ ONLY;
+SET LOCAL statement_timeout = '15s';
+SET LOCAL plan_cache_mode = force_generic_plan;
+EXPLAIN (ANALYZE, BUFFERS) EXECUTE q_old(:'q_from', 'নির্বাচন:*', :'q_from', '%নির্বাচন%', :'q_from', 'নির্বাচন:*', 500, '%নির্বাচন%', '%নির্বাচন%', 'নির্বাচন:*', 'নির্বাচন:*', 'নির্বাচন:*');
+ROLLBACK;
+\echo '--- Q2d DEPLOYED shape, নির্বাচন, CUSTOM plan (15 s cap, READ ONLY, ROLLBACK)'
+BEGIN TRANSACTION READ ONLY;
+SET LOCAL statement_timeout = '15s';
+SET LOCAL plan_cache_mode = force_custom_plan;
+EXPLAIN (ANALYZE, BUFFERS) EXECUTE q_old(:'q_from', 'নির্বাচন:*', :'q_from', '%নির্বাচন%', :'q_from', 'নির্বাচন:*', 500, '%নির্বাচন%', '%নির্বাচন%', 'নির্বাচন:*', 'নির্বাচন:*', 'নির্বাচন:*');
+ROLLBACK;
+
+\echo '--- Q3a NEW shape, ঢাকা, GENERIC plan (15 s cap, READ ONLY, ROLLBACK)'
+BEGIN TRANSACTION READ ONLY;
+SET LOCAL statement_timeout = '15s';
+SET LOCAL plan_cache_mode = force_generic_plan;
+EXPLAIN (ANALYZE, BUFFERS) EXECUTE q_new(:'q_from', 'ঢাকা:*', 500, :'q_from', '%ঢাকা%', 500, :'q_from', 'ঢাকা:*', 500, 500, '%ঢাকা%', '%ঢাকা%', 'ঢাকা:*', 'ঢাকা:*', 'ঢাকা:*');
+ROLLBACK;
+\echo '--- Q3b NEW shape, ঢাকা, CUSTOM plan = what the app now runs (15 s cap, READ ONLY, ROLLBACK)'
+BEGIN TRANSACTION READ ONLY;
+SET LOCAL statement_timeout = '15s';
+SET LOCAL plan_cache_mode = force_custom_plan;
+EXPLAIN (ANALYZE, BUFFERS) EXECUTE q_new(:'q_from', 'ঢাকা:*', 500, :'q_from', '%ঢাকা%', 500, :'q_from', 'ঢাকা:*', 500, 500, '%ঢাকা%', '%ঢাকা%', 'ঢাকা:*', 'ঢাকা:*', 'ঢাকা:*');
+ROLLBACK;
+\echo '--- Q3c NEW shape, নির্বাচন, GENERIC plan (15 s cap, READ ONLY, ROLLBACK)'
+BEGIN TRANSACTION READ ONLY;
+SET LOCAL statement_timeout = '15s';
+SET LOCAL plan_cache_mode = force_generic_plan;
+EXPLAIN (ANALYZE, BUFFERS) EXECUTE q_new(:'q_from', 'নির্বাচন:*', 500, :'q_from', '%নির্বাচন%', 500, :'q_from', 'নির্বাচন:*', 500, 500, '%নির্বাচন%', '%নির্বাচন%', 'নির্বাচন:*', 'নির্বাচন:*', 'নির্বাচন:*');
+ROLLBACK;
+\echo '--- Q3d NEW shape, নির্বাচন, CUSTOM plan = what the app now runs (15 s cap, READ ONLY, ROLLBACK)'
+BEGIN TRANSACTION READ ONLY;
+SET LOCAL statement_timeout = '15s';
+SET LOCAL plan_cache_mode = force_custom_plan;
+EXPLAIN (ANALYZE, BUFFERS) EXECUTE q_new(:'q_from', 'নির্বাচন:*', 500, :'q_from', '%নির্বাচন%', 500, :'q_from', 'নির্বাচন:*', 500, 500, '%নির্বাচন%', '%নির্বাচন%', 'নির্বাচন:*', 'নির্বাচন:*', 'নির্বাচন:*');
+ROLLBACK;
+
+\echo '--- Q4 NEW shape, ঢাকা, CUSTOM plan, work_mem = 64MB (lossy-bitmap check; 15 s cap, READ ONLY, ROLLBACK)'
+BEGIN TRANSACTION READ ONLY;
+SET LOCAL statement_timeout = '15s';
+SET LOCAL plan_cache_mode = force_custom_plan;
+SET LOCAL work_mem = '64MB';
+EXPLAIN (ANALYZE, BUFFERS) EXECUTE q_new(:'q_from', 'ঢাকা:*', 500, :'q_from', '%ঢাকা%', 500, :'q_from', 'ঢাকা:*', 500, 500, '%ঢাকা%', '%ঢাকা%', 'ঢাকা:*', 'ঢাকা:*', 'ঢাকা:*');
+ROLLBACK;
+
+\echo '--- Q5 degraded read, ঢাকা, newest 24 h, CUSTOM plan (15 s cap, READ ONLY, ROLLBACK)'
+BEGIN TRANSACTION READ ONLY;
+SET LOCAL statement_timeout = '15s';
+SET LOCAL plan_cache_mode = force_custom_plan;
+EXPLAIN (ANALYZE, BUFFERS) EXECUTE q_fallback(:'q_from24', '%ঢাকা%', 'ঢাকা:*', 500, '%ঢাকা%', '%ঢাকা%', 'ঢাকা:*', 'ঢাকা:*', 'ঢাকা:*');
+ROLLBACK;
+
+-- Q6-Q8: the AI-COLUMN shape (news_articles.ai_search_tsv, 2026-10-05), what
+-- the app runs once db push + perf-schema + the backfill are done. Before the
+-- column exists these PREPAREs fail and the EXECUTEs error; the rest still runs.
+\echo '--- Q6a ai_search_tsv readiness: column, index, triggers, backfill marker (app probe: NEWS_AI_COLUMN_PROBE_SQL)'
+SELECT (SELECT count(*) FROM pg_attribute WHERE attrelid = 'news_articles'::regclass AND attname = 'ai_search_tsv' AND NOT attisdropped) AS column_present,
+       (SELECT i.indisvalid FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid WHERE c.relname = 'news_articles_ai_search_tsv_gin_idx') AS index_valid,
+       (SELECT pg_size_pretty(pg_relation_size('news_articles_ai_search_tsv_gin_idx'::regclass))) AS index_size,
+       (SELECT count(*) FROM pg_trigger WHERE tgrelid = 'news_ai_analysis'::regclass AND tgenabled <> 'D'
+          AND tgname IN ('trg_news_ai_analysis_article_tsv_ins', 'trg_news_ai_analysis_article_tsv_upd', 'trg_news_ai_analysis_article_tsv_del')) AS triggers_enabled_of_3,
+       col_description('news_articles'::regclass,
+                       (SELECT attnum FROM pg_attribute WHERE attrelid = 'news_articles'::regclass AND attname = 'ai_search_tsv')) AS backfill_marker;
+\echo '--- Q6b coverage: GOOD articles that have an analysis with a vector, by window (null_share should be 0 after the backfill)'
+SELECT format($g$SELECT %L AS "window",
+       count(*) AS good_articles_with_ai_vector,
+       count(*) FILTER (WHERE na.ai_search_tsv IS NULL) AS ai_search_tsv_null,
+       round(100.0 * count(*) FILTER (WHERE na.ai_search_tsv IS NULL) / NULLIF(count(*), 0), 2) AS null_share_pct,
+       count(*) FILTER (WHERE (SELECT count(*) FROM news_ai_analysis a2 WHERE a2."articleId" = na.id AND a2.search_tsv IS NOT NULL) > 1) AS with_several_analyses
+FROM news_articles na
+WHERE na.status = 'GOOD'%s
+  AND EXISTS (SELECT 1 FROM news_ai_analysis a WHERE a."articleId" = na.id AND a.search_tsv IS NOT NULL)$g$,
+       COALESCE(w.span, 'all time'),
+       CASE WHEN w.span IS NULL THEN ''
+            ELSE format(E'\n  AND na."publishedAt" >= (now() AT TIME ZONE ''Asia/Dhaka'') - interval %L', w.span) END)
+FROM unnest(ARRAY['7 days', '90 days', NULL]::text[]) WITH ORDINALITY AS w(span, ord)
+ORDER BY w.ord
+\gexec
+
+-- AI-column shape, verbatim from the app (aiColumn = true).
+PREPARE q_col AS
+    WITH matched AS (
+        (SELECT na."id", na."sourceId", na."publishedAt", na."title"
+            FROM "news_articles" na
+            WHERE na."status" = 'GOOD' AND na."publishedAt" >= $1 AND (news_articles_fts_document(na."title", na."content") @@ to_tsquery('simple', $2) OR (na."ai_search_tsv" IS NOT NULL AND na."ai_search_tsv" @@ to_tsquery('simple', $3)))
+            ORDER BY na."publishedAt" DESC NULLS LAST, na."id" DESC
+            LIMIT $4)
+        UNION
+        (SELECT na."id", na."sourceId", na."publishedAt", na."title"
+            FROM "news_articles" na
+            WHERE na."status" = 'GOOD' AND na."publishedAt" >= $5 AND na."title" ILIKE $6
+            ORDER BY na."publishedAt" DESC NULLS LAST, na."id" DESC
+            LIMIT $7)
+    ),
+    cand AS (
+        SELECT m."id", m."sourceId", m."publishedAt", m."title"
+        FROM matched m
+        ORDER BY m."publishedAt" DESC NULLS LAST, m."id" DESC
+        LIMIT $8
+    )
+    SELECT c."id", c."sourceId", c."publishedAt",
+        ROUND((
+            (CASE WHEN c."title" ILIKE $9 THEN 1000 ELSE 0 END)
+            + 0
+            + (CASE WHEN c."title" ILIKE $10 THEN 300 ELSE 0 END)
+            + COALESCE(ai.boost, 0)
+        )::numeric, 4)::float8 AS "score"
+    FROM cand c
+    LEFT JOIN LATERAL (
+            SELECT ts_rank(nb."ai_search_tsv", to_tsquery('simple', $11)) * 100
+                + (CASE WHEN nb."ai_search_tsv" @@ to_tsquery('simple', $12) THEN 500 ELSE 0 END) AS boost
+            FROM "news_articles" nb
+            WHERE nb."id" = c."id"
+              AND nb."ai_search_tsv" IS NOT NULL AND nb."ai_search_tsv" @@ to_tsquery('simple', $13)
+        ) ai ON true
+    ORDER BY "score" DESC, c."publishedAt" DESC NULLS LAST, c."id" DESC;
+
+-- Degraded read, AI-column shape, verbatim from the app.
+PREPARE q_col_fallback AS
+    WITH cand AS (
+        SELECT na."id", na."sourceId", na."publishedAt", na."title"
+        FROM "news_articles" na
+        WHERE na."status" = 'GOOD' AND na."publishedAt" >= $1 AND ((na."title" || '') ILIKE $2 OR (na."ai_search_tsv" IS NOT NULL AND na."ai_search_tsv" @@ to_tsquery('simple', $3)))
+        ORDER BY na."publishedAt" DESC NULLS LAST, na."id" DESC
+        LIMIT $4
+    )
+    SELECT c."id", c."sourceId", c."publishedAt",
+        ROUND((
+            (CASE WHEN c."title" ILIKE $5 THEN 1000 ELSE 0 END)
+            + 0
+            + (CASE WHEN c."title" ILIKE $6 THEN 300 ELSE 0 END)
+            + COALESCE(ai.boost, 0)
+        )::numeric, 4)::float8 AS "score"
+    FROM cand c
+    LEFT JOIN LATERAL (
+            SELECT ts_rank(nb."ai_search_tsv", to_tsquery('simple', $7)) * 100
+                + (CASE WHEN nb."ai_search_tsv" @@ to_tsquery('simple', $8) THEN 500 ELSE 0 END) AS boost
+            FROM "news_articles" nb
+            WHERE nb."id" = c."id"
+              AND nb."ai_search_tsv" IS NOT NULL AND nb."ai_search_tsv" @@ to_tsquery('simple', $9)
+        ) ai ON true
+    ORDER BY "score" DESC, c."publishedAt" DESC NULLS LAST, c."id" DESC;
+
+\echo '--- Q7a AI-COLUMN shape, ঢাকা, CUSTOM plan = what the app runs after the backfill (15 s cap, READ ONLY, ROLLBACK)'
+BEGIN TRANSACTION READ ONLY;
+SET LOCAL statement_timeout = '15s';
+SET LOCAL plan_cache_mode = force_custom_plan;
+EXPLAIN (ANALYZE, BUFFERS) EXECUTE q_col(:'q_from', 'ঢাকা:*', 'ঢাকা:*', 500, :'q_from', '%ঢাকা%', 500, 500, '%ঢাকা%', '%ঢাকা%', 'ঢাকা:*', 'ঢাকা:*', 'ঢাকা:*');
+ROLLBACK;
+\echo '--- Q7b AI-COLUMN shape, ঢাকা, GENERIC plan (15 s cap, READ ONLY, ROLLBACK)'
+BEGIN TRANSACTION READ ONLY;
+SET LOCAL statement_timeout = '15s';
+SET LOCAL plan_cache_mode = force_generic_plan;
+EXPLAIN (ANALYZE, BUFFERS) EXECUTE q_col(:'q_from', 'ঢাকা:*', 'ঢাকা:*', 500, :'q_from', '%ঢাকা%', 500, 500, '%ঢাকা%', '%ঢাকা%', 'ঢাকা:*', 'ঢাকা:*', 'ঢাকা:*');
+ROLLBACK;
+\echo '--- Q7c AI-COLUMN shape, নির্বাচন, CUSTOM plan (15 s cap, READ ONLY, ROLLBACK)'
+BEGIN TRANSACTION READ ONLY;
+SET LOCAL statement_timeout = '15s';
+SET LOCAL plan_cache_mode = force_custom_plan;
+EXPLAIN (ANALYZE, BUFFERS) EXECUTE q_col(:'q_from', 'নির্বাচন:*', 'নির্বাচন:*', 500, :'q_from', '%নির্বাচন%', 500, 500, '%নির্বাচন%', '%নির্বাচন%', 'নির্বাচন:*', 'নির্বাচন:*', 'নির্বাচন:*');
+ROLLBACK;
+\echo '--- Q7d AI-COLUMN shape, নির্বাচন, GENERIC plan (15 s cap, READ ONLY, ROLLBACK)'
+BEGIN TRANSACTION READ ONLY;
+SET LOCAL statement_timeout = '15s';
+SET LOCAL plan_cache_mode = force_generic_plan;
+EXPLAIN (ANALYZE, BUFFERS) EXECUTE q_col(:'q_from', 'নির্বাচন:*', 'নির্বাচন:*', 500, :'q_from', '%নির্বাচন%', 500, 500, '%নির্বাচন%', '%নির্বাচন%', 'নির্বাচন:*', 'নির্বাচন:*', 'নির্বাচন:*');
+ROLLBACK;
+\echo '--- Q8 AI-COLUMN degraded read, ঢাকা, newest 24 h, CUSTOM plan (15 s cap, READ ONLY, ROLLBACK)'
+BEGIN TRANSACTION READ ONLY;
+SET LOCAL statement_timeout = '15s';
+SET LOCAL plan_cache_mode = force_custom_plan;
+EXPLAIN (ANALYZE, BUFFERS) EXECUTE q_col_fallback(:'q_from24', '%ঢাকা%', 'ঢাকা:*', 500, '%ঢাকা%', '%ঢাকা%', 'ঢাকা:*', 'ঢাকা:*', 'ঢাকা:*');
+ROLLBACK;
+
+DEALLOCATE q_col;
+DEALLOCATE q_col_fallback;
+
+DEALLOCATE q_old;
+DEALLOCATE q_new;
+DEALLOCATE q_fallback;
+\timing off
+SET statement_timeout = '120s';
 
 \echo '############ done — paste the whole output into docs/performance/backend-baseline.md §15 ############'

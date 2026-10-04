@@ -1664,6 +1664,11 @@ model NewsArticle {
   /// not a better heuristic here.
   language       String?
   searchTsv      Unsupported("tsvector")?     @map("search_tsv") // Full-text search vector
+  /// All of this article's news_ai_analysis.search_tsv vectors in one, kept by
+  /// the trg_news_ai_analysis_article_tsv_* triggers and backfilled by
+  /// scripts/performance/backfill-news-ai-search-tsv.sql (GIN index
+  /// news_articles_ai_search_tsv_gin_idx). Declared here so `db push` keeps it.
+  aiSearchTsv    Unsupported("tsvector")?     @map("ai_search_tsv")
   titleEmbedding Unsupported("vector(1024)")? @map("title_embedding") // BGE-M3 semantic embedding
 
   newsAIAnalyses NewsAIAnalysis[]
