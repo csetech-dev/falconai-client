@@ -86,11 +86,16 @@ verify_unit_exec() {
   # ExecStart may be "<interpreter> <script>" — check the script in that case.
   read -r -a parts <<<"${line}"
   target="${parts[0]}"
+  local via_interpreter=0
   case "$(basename "${target}")" in
-    python*|env|bash|sh) target="${parts[1]:-${target}}" ;;
+    python*|env|bash|sh) target="${parts[1]:-${target}}"; via_interpreter=1 ;;
   esac
   [[ -f "${target}" ]] || die "ExecStart target missing: ${target} (referenced by ${unit})"
-  [[ -x "${target}" ]] || die "ExecStart target not executable: ${target} — chmod 755 it"
+  # Run through an interpreter, the script needs no exec bit (it is lost when a
+  # Windows box commits the bundle); run directly, it does.
+  if [[ "${via_interpreter}" == "0" ]]; then
+    [[ -x "${target}" ]] || die "ExecStart target not executable: ${target} — chmod 755 it"
+  fi
   if head -1 "${target}" | grep -q $'\r'; then
     die "ExecStart target has CRLF line endings: ${target} — run: sed -i 's/\\r\$//' ${target}"
   fi

@@ -13,7 +13,10 @@ StartLimitBurst=5
 Type=simple
 User=root
 WorkingDirectory=/opt/falconai-client
-ExecStart=/opt/falconai-client/scripts/deploy-agent.sh
+# Run through bash explicitly: the script's exec bit is lost whenever a Windows
+# box (core.fileMode=false) commits it to the client repo, and a plain
+# ExecStart=<script> then fails with status=203/EXEC until restarts run out.
+ExecStart=/bin/bash /opt/falconai-client/scripts/deploy-agent.sh
 Restart=always
 RestartSec=5
 StandardOutput=journal
