@@ -19,6 +19,16 @@ DO $$ BEGIN
   RAISE EXCEPTION 'Another perf-schema run holds the falcon-performance-schema lock. Wait for it to finish (SELECT pid, query FROM pg_stat_activity WHERE query ILIKE ''%%CONCURRENTLY%%''), then rerun. Never run two at once.';
  END IF;
 END $$;
+-- Refuse to start while ANY index build is running (e.g. a hand-run CREATE
+-- INDEX CONCURRENTLY): the advisory lock only covers other perf-schema runs, and
+-- overlapping builds deadlock and leave an INVALID index (beta, 2026-10-05).
+DO $$ DECLARE busy text; BEGIN
+ SELECT string_agg(coalesce(p.index_relid::regclass::text, p.relid::regclass::text), ', ') INTO busy
+   FROM pg_stat_progress_create_index p WHERE p.pid <> pg_backend_pid();
+ IF busy IS NOT NULL THEN
+  RAISE EXCEPTION 'An index build is still running (%). Wait until SELECT * FROM pg_stat_progress_create_index returns no rows, then rerun.', busy;
+ END IF;
+END $$;
 -- Refuse invalid indexes: IF NOT EXISTS would otherwise silently skip rebuilding them.
 DO $$ BEGIN
  IF EXISTS (SELECT 1 FROM pg_index i JOIN pg_class c ON c.oid=i.indexrelid

@@ -46,6 +46,14 @@ DO $$ BEGIN
   RAISE EXCEPTION 'Another search-tsv schema run holds the falcon-search-tsv-schema lock. Wait for it to finish, then rerun. Never run two at once.';
  END IF;
 END $$;
+-- Refuse to start while ANY index build is running (see apply-performance-schema.sql).
+DO $$ DECLARE busy text; BEGIN
+ SELECT string_agg(coalesce(p.index_relid::regclass::text, p.relid::regclass::text), ', ') INTO busy
+   FROM pg_stat_progress_create_index p WHERE p.pid <> pg_backend_pid();
+ IF busy IS NOT NULL THEN
+  RAISE EXCEPTION 'An index build is still running (%). Wait until SELECT * FROM pg_stat_progress_create_index returns no rows, then rerun.', busy;
+ END IF;
+END $$;
 -- Refuse invalid indexes: IF NOT EXISTS would otherwise silently skip rebuilding them.
 DO $$ BEGIN
  IF EXISTS (SELECT 1 FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid
@@ -57,7 +65,7 @@ DO $$ BEGIN
               'profile_ai_analytics_search_tsv_gin_idx', 'post_ai_analysis_search_tsv_gin_idx',
               'video_segments_search_tsv_gin_idx', 'news_articles_title_embedding_hnsw_idx',
               'news_ai_analysis_content_embedding_hnsw_idx', 'campaigns_profile_embedding_hnsw_idx'))
- THEN RAISE EXCEPTION 'Invalid search-tsv index found. Drop ONLY the invalid named index CONCURRENTLY, then rerun.'; END IF;
+ THEN RAISE EXCEPTION 'Invalid search-tsv index found (list them: SELECT indexrelid::regclass FROM pg_index WHERE NOT indisvalid). If no index build is running, drop ONLY that index CONCURRENTLY, then rerun.'; END IF;
 END $$;
 
 -- ----------------------------------------------------------------------------
@@ -307,6 +315,12 @@ BEGIN
   END LOOP;
 END $$;
 SET lock_timeout = '0';
+-- Serial index builds. A parallel build passes maintenance_work_mem through a
+-- dynamic shared memory segment in /dev/shm, and the Postgres container keeps
+-- Docker's default 64 MB shm. On beta (2026-10-05) the hnsw build failed with
+-- "could not resize shared memory segment ... No space left on device" and left
+-- an INVALID index behind. A serial build uses process-local memory instead.
+SET max_parallel_maintenance_workers = 0;
 
 -- ----------------------------------------------------------------------------
 -- 4. Indexes (CONCURRENTLY: never blocks reads or writes)
