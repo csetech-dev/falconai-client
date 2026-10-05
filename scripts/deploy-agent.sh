@@ -116,20 +116,28 @@ run_prisma_db_push() {
     return 1
   fi
 
-  log "[PRISMA DB PUSH] Running prisma db push --skip-generate in falcon-core..."
-  if docker exec -w /app/libs/database falcon-core npx prisma db push --skip-generate 2>&1 | tee -a "$OUTPUT_FILE"; then
-    log "[PRISMA DB PUSH] prisma db push succeeded"
+  # Guarded schema sync, the same path as every other deploy (db.sh exec push
+  # -> scripts/deploy/schema-sync.sh): additive statements only, keep-listed
+  # live indexes never dropped, destructive changes stop (exit 3) with nothing
+  # applied. Needs .env.app (POSTGRES_* for psql), like run_perf_schema.
+  local rc=0
+  log "[SCHEMA SYNC] Guarded schema sync in falcon-core (bash ./scripts/deploy/db.sh exec push)..."
+  bash "$PROJECT_DIR/scripts/deploy/db.sh" exec push 2>&1 | tee -a "$OUTPUT_FILE" || rc=$?
+  if [[ "$rc" == "0" ]]; then
+    log "[SCHEMA SYNC] Schema sync succeeded"
+  elif [[ "$rc" == "3" ]]; then
+    fail_deployment "schema sync STOPPED on destructive changes — nothing was applied (statements in the output and .deploy/schema-sync-blocked.sql). Review, then apply deliberately or rerun with an override: docs/performance/PROD_UAT_DEPLOY.md, 'Schema sync stopped'"
+    return 1
   else
-    fail_deployment "prisma db push failed"
+    fail_deployment "schema sync failed (exit $rc; see output)"
     return 1
   fi
 }
 
-# db push drops news_articles_status_published_desc_nl_idx (Prisma cannot
-# express NULLS LAST), so every push must be followed by ONE serial re-apply of
-# scripts/performance/apply-performance-schema.sql. CONCURRENTLY + IF NOT EXISTS:
+# Every schema sync is followed by ONE serial re-apply of the performance and
+# search-layer schema (db.sh perf-schema). CONCURRENTLY + IF NOT EXISTS:
 # seconds when nothing is missing, never blocks reads/writes. Its post-check
-# exits non-zero naming any missing/INVALID index.
+# exits non-zero naming any missing/INVALID index or trigger.
 run_perf_schema() {
   echo "" >> "$OUTPUT_FILE"
   if [[ ! -f "$PROJECT_DIR/.env.app" ]]; then

@@ -1,12 +1,17 @@
 #!/usr/bin/env bash
 # Prisma / database operations for split or monolithic deploy.
 #
-# One-off (no running falcon-core):  push | push-loss | generate | seed | migrate | status
-# Running falcon-core (classic):     exec push | exec push-loss | exec generate | exec seed | ...
+# One-off (no running falcon-core):  push | push-check | push-raw | push-loss | generate | seed | migrate | status
+# Running falcon-core (classic):     exec push | exec push-check | exec push-raw | exec push-loss | exec generate | ...
+#
+# `push` is the GUARDED schema sync (scripts/deploy/schema-sync.sh): it applies
+# only additive changes, never drops a keep-listed live index, and stops on
+# anything destructive (exit 3) without applying anything. `push-raw` /
+# `push-loss` are the old raw `prisma db push` — emergencies only.
 #
 # Usage:
 #   ./scripts/deploy/db.sh push
-#   ./scripts/deploy/db.sh push-loss
+#   ./scripts/deploy/db.sh push-check
 #   ./scripts/deploy/db.sh exec push
 #   ./scripts/deploy/db.sh copy-schema
 set -euo pipefail
@@ -14,6 +19,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=common.sh
 source "${SCRIPT_DIR}/common.sh"
+# shellcheck source=schema-sync.sh
+source "${SCRIPT_DIR}/schema-sync.sh"
 
 ENV_FILE="${ROOT_DIR}/.env.app"
 DB_DIR="/app/libs/database"
@@ -33,8 +40,18 @@ usage() {
 Prisma / database commands
 
 One-off container (falcon-core does NOT need to be running; uses .env.app):
-  push              prisma db push --skip-generate              (prefer no data loss)
-  push-loss         prisma db push --skip-generate --accept-data-loss
+  push              GUARDED schema sync: prisma migrate diff -> apply only additive
+                    statements in one transaction; keep-listed live indexes
+                    (scripts/performance/live-only-indexes.txt) are never dropped;
+                    anything destructive STOPS with exit 3 and applies nothing.
+                    Overrides (one run, logged to .deploy/schema-sync.log):
+                      FALCON_ALLOW_DESTRUCTIVE_SCHEMA=1       apply the blocked statements too
+                      FALCON_SCHEMA_SYNC_DEFER_DESTRUCTIVE=1  apply the safe part, leave the rest
+                    FALCON_SCHEMA_LOCK_TIMEOUT=30s          per-statement lock wait
+  push-check        diff + classify only, applies nothing (exit 3 = would stop)
+  push-raw          EMERGENCY: raw prisma db push --skip-generate (drops live-only
+                    indexes; run perf-schema right after)
+  push-loss         EMERGENCY: raw prisma db push --skip-generate --accept-data-loss
   generate          prisma generate
   seed              full seed flow (seed.ts + prompts + news sources + news status filter + news media groups + geo)
   seed-prompts      npm run seed:prompts
@@ -51,14 +68,17 @@ One-off container (falcon-core does NOT need to be running; uses .env.app):
   migrate           prisma migrate deploy
   status            prisma migrate status
   psql              psql client (args after --)
-  perf-schema       apply scripts/performance/apply-performance-schema.sql (CONCURRENTLY, idempotent)
+  perf-schema       apply scripts/performance/apply-performance-schema.sql, then
+                    apply-search-tsv-schema.sql (CONCURRENTLY, idempotent)
   perf-inspect      read-only DB baseline (scripts/performance/inspect-database.sql)
   perf-diagnose-search  STAGE ONLY: plans + collation/pg_trgm checks for topic search and the Latest feed
 
 Running falcon-core container (classic docker exec approach):
   copy-schema       docker cp schema.prisma into running falcon-core
-  exec push         docker exec … prisma db push --skip-generate
-  exec push-loss    docker exec … prisma db push --skip-generate --accept-data-loss
+  exec push         copy-schema, then the guarded schema sync, diff run via docker exec
+  exec push-check   copy-schema, then diff + classify only
+  exec push-raw     EMERGENCY: docker exec … prisma db push --skip-generate
+  exec push-loss    EMERGENCY: docker exec … prisma db push --skip-generate --accept-data-loss
   exec generate     docker exec … prisma generate
   exec seed         docker exec … full seed flow
   exec seed-prompts docker exec … npm run seed:prompts
@@ -72,7 +92,8 @@ Examples:
   make db-push-loss
   make db-exec-push
   make db-exec-seed-prompts
-  ./scripts/deploy/db.sh exec push-loss
+  ./scripts/deploy/db.sh push-check
+  FALCON_SCHEMA_SYNC_DEFER_DESTRUCTIVE=1 ./scripts/deploy/db.sh push
   ./scripts/deploy/db.sh psql -- -c "SELECT count(*) FROM users;"
 EOF
 }
@@ -145,6 +166,37 @@ run_psql() {
     postgres:18 \
     psql -h "${POSTGRES_HOST}" -p "${POSTGRES_PORT:-5432}" -U "${POSTGRES_USER:-postgres}" -d falcon_ai \
     "${args[@]}"
+}
+
+# Guarded sync runners (scripts/deploy/schema-sync.sh). The diff runs where
+# the old push ran: a one-off falcon-core (image schema; -T: no TTY, so no CRLF
+# line endings) or the running falcon-core after copy-schema.
+schema_diff_oneoff() {
+  detect_compose
+  compose_db_args
+  if is_ghcr_deploy && ! has_host_schema; then
+    log "GHCR client bundle: using schema baked into falcon-core image (no host schema.prisma)" >&2
+  fi
+  "${COMPOSE[@]}" "${COMPOSE_DB_ARGS[@]}" run --rm --no-deps -T falcon-core \
+    sh -lc "$(schema_sync_diff_shell_cmd "${DB_DIR}")"
+}
+
+schema_diff_exec() {
+  require_running_core
+  docker exec -w "${DB_DIR}" "${CORE_CONTAINER}" sh -lc "$(schema_sync_diff_shell_cmd "${DB_DIR}")"
+}
+
+# run_guarded_push <oneoff|exec> <apply|check>; exits 3 when blocked.
+run_guarded_push() {
+  local mode="$1" what="$2" rc=0
+  [[ -f "${ENV_FILE}" ]] || die "Missing ${ENV_FILE}: the guarded schema sync needs POSTGRES_* for psql. Emergency only: ./scripts/deploy/db.sh push-raw"
+  if [[ "${mode}" == "exec" ]]; then
+    copy_schema_to_core
+    schema_sync "${what}" schema_diff_exec run_psql || rc=$?
+  else
+    schema_sync "${what}" schema_diff_oneoff run_psql || rc=$?
+  fi
+  exit "${rc}"
 }
 
 prisma_push_cmd() {
@@ -251,10 +303,17 @@ main() {
 
   case "${command}" in
     push)
+      run_guarded_push oneoff apply
+      ;;
+    push-check)
+      run_guarded_push oneoff check
+      ;;
+    push-raw)
+      warn "push-raw is a RAW prisma db push: it drops every keep-listed live index (search layer, desc_nl, hnsw). Run ONCE afterwards: bash ./scripts/deploy/db.sh perf-schema"
       run_db_action oneoff push 0
       ;;
     push-loss)
-      warn "push-loss may drop columns/tables — backup first if unsure."
+      warn "push-loss is a RAW prisma db push --accept-data-loss: it may drop columns/tables AND drops every keep-listed live index — backup first. Run ONCE afterwards: bash ./scripts/deploy/db.sh perf-schema"
       run_db_action oneoff push 1
       ;;
     generate)
@@ -283,17 +342,24 @@ main() {
       shift || true
       case "${sub}" in
         push)
+          run_guarded_push exec apply
+          ;;
+        push-check)
+          run_guarded_push exec check
+          ;;
+        push-raw)
+          warn "exec push-raw is a RAW prisma db push: it drops every keep-listed live index. Run ONCE afterwards: bash ./scripts/deploy/db.sh perf-schema"
           run_db_action exec push 0
           ;;
         push-loss)
-          warn "exec push-loss may drop columns/tables — backup first if unsure."
+          warn "exec push-loss is a RAW prisma db push --accept-data-loss: it may drop columns/tables AND drops every keep-listed live index — backup first. Run ONCE afterwards: bash ./scripts/deploy/db.sh perf-schema"
           run_db_action exec push 1
           ;;
         generate|seed|seed-prompts|seed-news-prompts|seed-news-sources|seed-news-status|seed-news-media|seed-keyword-categories-type|seed-international-keywords|seed-international-news-source|seed-epaper-sources|seed-geo|seed-videos|seed-twitter-profiles|seed-telegram-profiles|migrate|status)
           run_db_action exec "${sub}"
           ;;
         "")
-          die "Usage: db.sh exec <push|push-loss|generate|seed|seed-prompts|seed-news-sources|seed-news-status|seed-news-media|seed-international-keywords|seed-epaper-sources|seed-geo|seed-videos|seed-twitter-profiles|seed-telegram-profiles|migrate|status|...>"
+          die "Usage: db.sh exec <push|push-check|push-raw|push-loss|generate|seed|seed-prompts|seed-news-sources|seed-news-status|seed-news-media|seed-international-keywords|seed-epaper-sources|seed-geo|seed-videos|seed-twitter-profiles|seed-telegram-profiles|migrate|status|...>"
           ;;
         *)
           # `sub` was already consumed by this case, so it has to be put back:
@@ -315,6 +381,9 @@ main() {
       # Fed on stdin so it runs as separate autocommit statements — never
       # inside a transaction, which CONCURRENTLY forbids.
       run_psql -v ON_ERROR_STOP=1 -f - < "${ROOT_DIR}/scripts/performance/apply-performance-schema.sql"
+      # The live search layer (search_tsv helpers, triggers, GIN/hnsw indexes),
+      # a copy of prod. Own session, own try-lock, own post-check.
+      run_psql -v ON_ERROR_STOP=1 -f - < "${ROOT_DIR}/scripts/performance/apply-search-tsv-schema.sql"
       ok "Performance schema applied. Check GET /api/v1/health/ready on both core planes, then set PERFORMANCE_SCHEMA_MODE=verify."
       ;;
     perf-inspect)

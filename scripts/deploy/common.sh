@@ -275,12 +275,12 @@ prune_docker_artifacts() {
   ok "Docker prune complete."
 }
 
-# Re-apply scripts/performance/apply-performance-schema.sql right after
-# `prisma db push`. db push makes the DB match schema.prisma and DROPS any
-# index it can parse but the schema does not declare — today exactly one:
-# news_articles_status_published_desc_nl_idx ("publishedAt" DESC NULLS LAST,
-# which Prisma cannot express). Expression/partial indexes, the fts function
-# and the AI search_tsv trigger survive the push (Prisma ignores them).
+# Re-apply the raw-SQL schema (db.sh perf-schema: apply-performance-schema.sql,
+# then apply-search-tsv-schema.sql) right after the schema sync (db.sh push).
+# The guarded sync never drops a keep-listed index
+# (scripts/performance/live-only-indexes.txt), so normally this only confirms
+# that every index and trigger is there; it rebuilds whatever a raw push
+# (push-raw / push-loss) or a manual change dropped.
 #
 # Runs ONCE, in the foreground, with no timeout. Every statement is
 # CREATE INDEX CONCURRENTLY IF NOT EXISTS, so it never blocks reads/writes and
@@ -294,13 +294,13 @@ prune_docker_artifacts() {
 # Set SKIP_PERF_SCHEMA=1 to skip (e.g. while an operator is building by hand).
 reapply_performance_schema() {
   if [[ "${SKIP_PERF_SCHEMA:-0}" == "1" ]]; then
-    warn "SKIP_PERF_SCHEMA=1 — NOT re-applying the performance schema after db push."
-    warn "news_articles_status_published_desc_nl_idx may now be missing; run: bash ./scripts/deploy/db.sh perf-schema"
+    warn "SKIP_PERF_SCHEMA=1 — NOT re-applying the performance schema after the schema sync."
+    warn "A performance/search-layer index or trigger may be missing; run: bash ./scripts/deploy/db.sh perf-schema"
     return 0
   fi
   local started rc
   started="$(date +%s)"
-  log "Re-applying performance schema after db push (db.sh perf-schema; CONCURRENTLY, foreground, no timeout)..."
+  log "Re-applying performance + search-layer schema after the schema sync (db.sh perf-schema; CONCURRENTLY, foreground, no timeout)..."
   log "Progress from another shell: bash ./scripts/deploy/db.sh psql -- -c \"SELECT phase, blocks_done, blocks_total FROM pg_stat_progress_create_index;\""
   rc=0
   bash "${ROOT_DIR}/scripts/deploy/db.sh" perf-schema || rc=$?
@@ -309,7 +309,7 @@ reapply_performance_schema() {
     return 0
   fi
   printf '%b[%s] ERROR: %s%b\n' "${RED}" "$(date '+%H:%M:%S')" \
-    "Performance schema re-apply FAILED (exit ${rc}) after db push. A performance index is missing or INVALID — see the psql error above. The app is running but news feeds/search may be slow. Fix: if an index is INVALID, DROP INDEX CONCURRENTLY it, then run ONCE: bash ./scripts/deploy/db.sh perf-schema (docs/performance/RUNBOOK.md §4)." \
+    "Performance schema re-apply FAILED (exit ${rc}) after the schema sync. A performance/search-layer index or trigger is missing or INVALID — see the psql error above. The app is running but news feeds/search may be slow. Fix: if an index is INVALID, DROP INDEX CONCURRENTLY it, then run ONCE: bash ./scripts/deploy/db.sh perf-schema (docs/performance/RUNBOOK.md §4)." \
     "${NC}" >&2
   return "${rc}"
 }

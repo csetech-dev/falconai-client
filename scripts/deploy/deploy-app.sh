@@ -93,6 +93,19 @@ if [[ "${USE_GHCR}" == "1" ]]; then
   log "GHCR mode: pulling ${GHCR_IMAGE_PREFIX} (tag: ${FALCON_IMAGE_TAG:-latest})..."
   log "FlareSolverr uses public ghcr.io/flaresolverr/flaresolverr (not ${GHCR_IMAGE_PREFIX})."
   "${COMPOSE[@]}" "${COMPOSE_ARGS[@]}" pull
+
+  # Schema preflight BEFORE anything restarts: diff the live database against
+  # the schema in the image just pulled. A destructive change (exit 3) stops
+  # the deploy here, with the old containers still running untouched. Other
+  # failures (e.g. prisma could not connect) only warn: the real sync after
+  # `up` reports them again and fails the step.
+  PREFLIGHT_RC=0
+  bash "${SCRIPT_DIR}/db.sh" push-check || PREFLIGHT_RC=$?
+  if [[ "${PREFLIGHT_RC}" == "3" ]]; then
+    die "Deploy STOPPED before restarting anything: the new schema has destructive changes (listed above). Review them, then apply deliberately or rerun with an override — docs/performance/PROD_UAT_DEPLOY.md, 'Schema sync stopped'."
+  elif [[ "${PREFLIGHT_RC}" != "0" ]]; then
+    warn "Schema preflight could not run (exit ${PREFLIGHT_RC}); continuing — the schema sync after start-up will retry."
+  fi
 fi
 
 UP_ARGS=("${COMPOSE_ARGS[@]}" up -d)
@@ -113,13 +126,22 @@ fi
 DB_PUSH_FAILED=0
 PERF_SCHEMA_FAILED=0
 if [[ "${USE_GHCR}" == "1" ]]; then
-  log "Applying Prisma schema (one-off container)..."
-  if ! bash "${SCRIPT_DIR}/db.sh" push; then
+  # Guarded schema sync (db.sh push -> scripts/deploy/schema-sync.sh): only
+  # additive statements, keep-listed live indexes never dropped, destructive
+  # changes stop with exit 3 and nothing applied.
+  log "Applying Prisma schema (guarded sync, one-off container)..."
+  DB_PUSH_RC=0
+  bash "${SCRIPT_DIR}/db.sh" push || DB_PUSH_RC=$?
+  if [[ "${DB_PUSH_RC}" != "0" ]]; then
     DB_PUSH_FAILED=1
-    warn "prisma db push failed — check DATABASE_URL in .env.app and falcon-core logs."
+    if [[ "${DB_PUSH_RC}" == "3" ]]; then
+      warn "Schema sync STOPPED on destructive changes (listed above) — nothing was applied."
+    else
+      warn "Schema sync failed — check DATABASE_URL in .env.app and falcon-core logs."
+    fi
   fi
-  # db push drops news_articles_status_published_desc_nl_idx (Prisma cannot
-  # express NULLS LAST) — put it back straight away, serially. See common.sh.
+  # Idempotent and additive: restores any performance / search-layer index or
+  # trigger that is missing. Runs even when the sync stopped. See common.sh.
   reapply_performance_schema || PERF_SCHEMA_FAILED=1
 fi
 
@@ -138,7 +160,7 @@ fi
 if [[ "${DB_PUSH_FAILED}" == "1" || "${PERF_SCHEMA_FAILED}" == "1" ]]; then
   print_app_banner
   [[ "${DB_PUSH_FAILED}" == "1" ]] && \
-    warn "prisma db push FAILED — rerun: bash ./scripts/deploy/db.sh push, then ONCE: bash ./scripts/deploy/db.sh perf-schema"
+    warn "schema sync FAILED or STOPPED — fix/review (docs/performance/PROD_UAT_DEPLOY.md, 'Schema sync stopped'), then rerun: bash ./scripts/deploy/db.sh push, then ONCE: bash ./scripts/deploy/db.sh perf-schema"
   [[ "${PERF_SCHEMA_FAILED}" == "1" ]] && \
     warn "performance schema re-apply FAILED — fix the INVALID/missing index, then run ONCE: bash ./scripts/deploy/db.sh perf-schema"
   die "Application deployed, but the database step failed (see above)."
