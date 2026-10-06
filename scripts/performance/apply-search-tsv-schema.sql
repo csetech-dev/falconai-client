@@ -7,9 +7,10 @@
 -- prod, taken from pg_get_functiondef / pg_get_triggerdef / pg_indexes on
 -- 2026-10-05, so any database can be brought to the same state.
 --
--- DO NOT "fix" anything here: it must behave exactly like prod. Known defects
--- are tracked separately (docs/performance/TODO.md): the safe_to_tsvector
--- ASCII fallback blanks Bangla payloads (P0-B1).
+-- It must behave exactly like prod, with ONE deliberate exception: the
+-- safe_to_tsvector fallback no longer blanks Bangla (P0-B1, 2026-10-06; the
+-- next perf-schema run ships it to prod via CREATE OR REPLACE). Any other
+-- change belongs in docs/performance/TODO.md first.
 --
 -- Run: `bash ./scripts/deploy/db.sh perf-schema` runs this file right after
 -- apply-performance-schema.sql (which owns trg_news_ai_analysis_search_tsv and
@@ -72,9 +73,16 @@ END $$;
 -- 1. Helpers
 -- ----------------------------------------------------------------------------
 
--- Prod definition, verbatim. KNOWN DEFECT (P0-B1, not fixed here on purpose):
--- when the round trip raises, the fallback replaces every non-ASCII character
--- with a space, so a Bangla text loses its whole payload.
+-- Prod definition except the fallback (P0-B1 fix, 2026-10-06). Prod's fallback
+-- was regexp_replace(input, '[^\x20-\x7E]', ' ', 'g'), an ASCII allow-list that
+-- turned a whole Bangla text into spaces whenever the round trip raised. It now
+-- strips only the C0 controls and DEL, keeping tab/LF/CR and every printable
+-- codepoint (Bangla, ZWJ/ZWNJ). The pattern is an E'' literal with doubled
+-- backslashes so the regex engine receives \x00..\x7F escapes whatever
+-- standard_conforming_strings is (a plain '\x00' would become a raw NUL byte,
+-- and fail, with the setting off). Rows the old fallback already flattened stay
+-- flattened: docs/performance/TODO.md, "P0-B1 follow-up", and
+-- scripts/performance/find-flattened-search-tsv.sql.
 CREATE OR REPLACE FUNCTION safe_to_tsvector(input text) RETURNS tsvector
 LANGUAGE plpgsql IMMUTABLE AS $$
 DECLARE
@@ -86,7 +94,7 @@ BEGIN
   BEGIN
     cleaned := convert_from(convert_to(input, 'UTF8'), 'UTF8');
   EXCEPTION WHEN others THEN
-    cleaned := regexp_replace(input, '[^\x20-\x7E]', ' ', 'g');
+    cleaned := regexp_replace(input, E'[\\x00-\\x08\\x0B\\x0C\\x0E-\\x1F\\x7F]', ' ', 'g');
   END;
   RETURN to_tsvector('simple', cleaned);
 END;

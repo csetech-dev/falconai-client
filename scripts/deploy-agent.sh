@@ -19,6 +19,42 @@
 
 set -euo pipefail
 
+# ---- Self-reload (see maybe_reload_agent) -----------------------------------
+# A long-lived bash process keeps executing the functions it parsed at start,
+# whatever `git pull` later writes to disk. Fingerprint this file and
+# deploy/common.sh NOW, before anything else runs, so the fingerprint describes
+# the code this process is actually executing. Also snapshot the environment
+# systemd started us with: run_deployment sources .env.app and exports deploy
+# variables into this shell, and a reload must not inherit them.
+AGENT_SELF="$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")"
+AGENT_COMMON="$(dirname "$AGENT_SELF")/deploy/common.sh"
+AGENT_BOOT_DIR="$(pwd)"
+AGENT_BOOT_ENV=()
+mapfile -d '' -t AGENT_BOOT_ENV < <(env -0) || AGENT_BOOT_ENV=()
+
+agent_fingerprint() {
+  local f sum out=""
+  for f in "$AGENT_SELF" "$AGENT_COMMON"; do
+    if [[ -f "$f" ]]; then
+      if command -v sha256sum >/dev/null 2>&1; then
+        sum="$(sha256sum < "$f" 2>/dev/null | cut -c1-16)" || sum=""
+      else
+        sum="$(cksum < "$f" 2>/dev/null | tr ' ' '-')" || sum=""
+      fi
+      out+="${sum:-unreadable}/"
+    else
+      out+="absent/"
+    fi
+  done
+  printf '%s' "$out"
+}
+
+AGENT_RUNNING_FP="$(agent_fingerprint)"
+AGENT_REJECTED_FP=""
+AGENT_DEFERRED_FP=""
+# Minimum seconds between two self-reloads (guard against any reload loop).
+AGENT_RELOAD_MIN_INTERVAL="${FALCON_AGENT_RELOAD_MIN_INTERVAL:-60}"
+
 PROJECT_DIR="${FALCON_PROJECT_DIR:-/opt/FalconAI}"
 # Status/trigger dir must be PROJECT/.deploy. Older units wrongly set
 # FALCON_DEPLOY_DIR to the project root (same as FALCON_PROJECT_DIR) — that
@@ -74,6 +110,10 @@ fi
 echo "[deploy-agent] Started. Watching $TRIGGER_FILE ..."
 echo "[deploy-agent] Project dir: $PROJECT_DIR"
 echo "[deploy-agent] Deploy mode: $DEPLOY_MODE"
+echo "[deploy-agent] Code fingerprint: $AGENT_RUNNING_FP (deploy-agent.sh/common.sh)"
+if [[ -n "${FALCON_AGENT_RELOADED_FROM:-}" ]]; then
+  echo "[deploy-agent] Self-reloaded at $(date -u -d "@${FALCON_AGENT_LAST_RELOAD_AT:-0}" +%FT%TZ 2>/dev/null || echo '?'): ${FALCON_AGENT_RELOADED_FROM} -> ${AGENT_RUNNING_FP}"
+fi
 
 compose_args() {
   local args=()
@@ -485,6 +525,85 @@ run_command() {
   date -u +"%Y-%m-%dT%H:%M:%S.000Z" > "$CMD_COMPLETED_AT_FILE"
 }
 
+agent_reload_log() {
+  local line
+  line="[deploy-agent] [self-reload] $*"
+  echo "$line"
+  { echo "$(date -u +%FT%TZ) $line" >> "$DEPLOY_DIR/agent-reload.log"; } 2>/dev/null || true
+}
+
+# Restart this agent in place when deploy-agent.sh or deploy/common.sh changed on
+# disk (typically the `git pull` that `deploy.sh ghcr` runs). Called ONLY from the
+# main loop between jobs: after a deployment/command has returned (status files
+# already final) and before a pending trigger is consumed (the trigger file stays
+# on disk, so the new agent picks it up). Nothing is ever interrupted.
+#
+# `exec` (same PID) rather than exit-and-let-systemd-restart: systemd sees no
+# restart, so reloads never count toward StartLimitBurst; there is no RestartSec
+# gap; it also works when the agent runs outside systemd. The new process gets
+# the boot environment, not this shell's (which has .env.app and the last
+# webhook's FALCON_IMAGE_TAG exported into it).
+#
+# Loop guards: a reload happens only when the on-disk fingerprint differs from
+# the one this process computed for itself at startup, and the new process
+# recomputes its own, so each reload needs a real new change on disk; the files
+# must be stable for 2 s and pass `bash -n` (a broken script is never exec'd: it
+# would crash and burn systemd's start limit); at most one reload per
+# FALCON_AGENT_RELOAD_MIN_INTERVAL seconds. FALCON_AGENT_AUTO_RELOAD=0 disables.
+#
+# Returns 0 when the running code may be used (unchanged, or the new code was
+# rejected by `bash -n`), 1 when a reload is due but deferred (still settling /
+# min interval): callers then leave the pending trigger on disk and retry.
+maybe_reload_agent() {
+  local when="$1"
+  [[ "${FALCON_AGENT_AUTO_RELOAD:-1}" == "1" ]] || return 0
+
+  local disk_fp
+  disk_fp="$(agent_fingerprint)"
+  [[ "$disk_fp" != "$AGENT_RUNNING_FP" ]] || return 0
+  [[ "$disk_fp" != "$AGENT_REJECTED_FP" ]] || return 0
+
+  # git pull writes several files: wait until the change has settled.
+  sleep 2
+  if [[ "$(agent_fingerprint)" != "$disk_fp" ]]; then
+    agent_reload_log "Agent code still changing on disk ($when); re-checking shortly."
+    return 1
+  fi
+
+  local now last
+  now="$(date +%s)"
+  last="${FALCON_AGENT_LAST_RELOAD_AT:-0}"
+  [[ "$last" =~ ^[0-9]+$ ]] || last=0
+  if (( now - last < AGENT_RELOAD_MIN_INTERVAL )); then
+    if [[ "$disk_fp" != "$AGENT_DEFERRED_FP" ]]; then
+      AGENT_DEFERRED_FP="$disk_fp"
+      agent_reload_log "Agent code changed ($when) but the last reload was $((now - last))s ago (< ${AGENT_RELOAD_MIN_INTERVAL}s); pending jobs wait, reloading once the interval has passed."
+    fi
+    return 1
+  fi
+
+  local f
+  for f in "$AGENT_SELF" "$AGENT_COMMON"; do
+    [[ -f "$f" ]] || continue
+    if ! bash -n "$f" 2>/dev/null; then
+      AGENT_REJECTED_FP="$disk_fp"
+      agent_reload_log "WARNING: $f changed but fails 'bash -n'; NOT reloading, still running $AGENT_RUNNING_FP. Fix the bundle (or restart the agent once it is fixed)."
+      return 0
+    fi
+  done
+
+  agent_reload_log "Agent code changed on disk ($when): $AGENT_RUNNING_FP -> $disk_fp. Re-executing $AGENT_SELF (same PID)."
+  cd "$AGENT_BOOT_DIR" 2>/dev/null || cd /
+  if (( ${#AGENT_BOOT_ENV[@]} > 0 )); then
+    exec env -i "${AGENT_BOOT_ENV[@]}" \
+      "FALCON_AGENT_LAST_RELOAD_AT=$now" \
+      "FALCON_AGENT_RELOADED_FROM=$AGENT_RUNNING_FP" \
+      /bin/bash "$AGENT_SELF"
+  fi
+  export FALCON_AGENT_LAST_RELOAD_AT="$now" FALCON_AGENT_RELOADED_FROM="$AGENT_RUNNING_FP"
+  exec /bin/bash "$AGENT_SELF"
+}
+
 # Main watch loop
 while true; do
   if [ -f "$TRIGGER_FILE" ]; then
@@ -493,17 +612,29 @@ while true; do
       sleep 2
       continue
     fi
+    # A bundle updated since this agent started must not be deployed by the
+    # old in-memory code: reload first (the trigger file is kept for the new agent).
+    if ! maybe_reload_agent "before deployment"; then
+      sleep 2
+      continue
+    fi
     rm -f "$TRIGGER_FILE"
     echo "[deploy-agent] Trigger detected — starting deployment..."
     run_deployment || true
+    maybe_reload_agent "after deployment" || true
     continue
   fi
 
   if [ -f "$CMD_TRIGGER_FILE" ]; then
+    if ! maybe_reload_agent "before command"; then
+      sleep 2
+      continue
+    fi
     CMD="$(cat "$CMD_TRIGGER_FILE")"
     rm -f "$CMD_TRIGGER_FILE"
     echo "[deploy-agent] Command trigger detected — running command..."
     run_command "$CMD" || true
+    maybe_reload_agent "after command" || true
   fi
 
   sleep 2

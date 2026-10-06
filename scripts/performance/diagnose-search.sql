@@ -3151,7 +3151,12 @@ ROLLBACK;
 --     the column, no news_ai_analysis read): ঢাকা and নির্বাচন, custom vs
 --     generic. Expect a BitmapOr of news_articles_fts_expr_idx and
 --     news_articles_ai_search_tsv_gin_idx and no news_ai_analysis node.
---  Q8 the degraded 24 h read in the AI-COLUMN shape.
+--     Since perf/news-search-carry-ai-tsv (2026-10-06) the candidate rows
+--     carry ai_search_tsv (UNION ALL + DISTINCT ON ("publishedAt", "id")),
+--     so expect NO "news_articles nb" / news_articles_pkey node in the
+--     scoring (the old shape probed it 500 times: ~2 s of the 2.45 s cold
+--     Q7a on beta).
+--  Q8 the degraded 24 h read in the AI-COLUMN shape (also carries the vector).
 --  Read-only: every EXPLAIN runs in its own READ ONLY transaction with a 15 s
 --  statement_timeout and ends in ROLLBACK; the prepared statements are
 --  DEALLOCATEd at the end. Expect the cause to show as: GENERIC well over 4 s
@@ -3403,23 +3408,27 @@ FROM unnest(ARRAY['7 days', '90 days', NULL]::text[]) WITH ORDINALITY AS w(span,
 ORDER BY w.ord
 \gexec
 
--- AI-column shape, verbatim from the app (aiColumn = true).
+-- AI-column shape, verbatim from the app (aiColumn = true). Since
+-- perf/news-search-carry-ai-tsv the candidates carry ai_search_tsv: the
+-- branches are a UNION ALL, cand dedupes on the article with DISTINCT ON
+-- ("publishedAt", "id"), and the scoring reads c."ai_search_tsv" (no
+-- news_articles nb primary-key probe per candidate).
 PREPARE q_col AS
     WITH matched AS (
-        (SELECT na."id", na."sourceId", na."publishedAt", na."title"
+        (SELECT na."id", na."sourceId", na."publishedAt", na."title", na."ai_search_tsv"
             FROM "news_articles" na
             WHERE na."status" = 'GOOD' AND na."publishedAt" >= $1 AND (news_articles_fts_document(na."title", na."content") @@ to_tsquery('simple', $2) OR (na."ai_search_tsv" IS NOT NULL AND na."ai_search_tsv" @@ to_tsquery('simple', $3)))
             ORDER BY na."publishedAt" DESC NULLS LAST, na."id" DESC
             LIMIT $4)
-        UNION
-        (SELECT na."id", na."sourceId", na."publishedAt", na."title"
+        UNION ALL
+        (SELECT na."id", na."sourceId", na."publishedAt", na."title", na."ai_search_tsv"
             FROM "news_articles" na
             WHERE na."status" = 'GOOD' AND na."publishedAt" >= $5 AND na."title" ILIKE $6
             ORDER BY na."publishedAt" DESC NULLS LAST, na."id" DESC
             LIMIT $7)
     ),
     cand AS (
-        SELECT m."id", m."sourceId", m."publishedAt", m."title"
+        SELECT DISTINCT ON (m."publishedAt", m."id") m."id", m."sourceId", m."publishedAt", m."title", m."ai_search_tsv"
         FROM matched m
         ORDER BY m."publishedAt" DESC NULLS LAST, m."id" DESC
         LIMIT $8
@@ -3433,18 +3442,16 @@ PREPARE q_col AS
         )::numeric, 4)::float8 AS "score"
     FROM cand c
     LEFT JOIN LATERAL (
-            SELECT ts_rank(nb."ai_search_tsv", to_tsquery('simple', $11)) * 100
-                + (CASE WHEN nb."ai_search_tsv" @@ to_tsquery('simple', $12) THEN 500 ELSE 0 END) AS boost
-            FROM "news_articles" nb
-            WHERE nb."id" = c."id"
-              AND nb."ai_search_tsv" IS NOT NULL AND nb."ai_search_tsv" @@ to_tsquery('simple', $13)
+            SELECT ts_rank(c."ai_search_tsv", to_tsquery('simple', $11)) * 100
+                + (CASE WHEN c."ai_search_tsv" @@ to_tsquery('simple', $12) THEN 500 ELSE 0 END) AS boost
+            WHERE c."ai_search_tsv" IS NOT NULL AND c."ai_search_tsv" @@ to_tsquery('simple', $13)
         ) ai ON true
     ORDER BY "score" DESC, c."publishedAt" DESC NULLS LAST, c."id" DESC;
 
--- Degraded read, AI-column shape, verbatim from the app.
+-- Degraded read, AI-column shape, verbatim from the app (carries the vector too).
 PREPARE q_col_fallback AS
     WITH cand AS (
-        SELECT na."id", na."sourceId", na."publishedAt", na."title"
+        SELECT na."id", na."sourceId", na."publishedAt", na."title", na."ai_search_tsv"
         FROM "news_articles" na
         WHERE na."status" = 'GOOD' AND na."publishedAt" >= $1 AND ((na."title" || '') ILIKE $2 OR (na."ai_search_tsv" IS NOT NULL AND na."ai_search_tsv" @@ to_tsquery('simple', $3)))
         ORDER BY na."publishedAt" DESC NULLS LAST, na."id" DESC
@@ -3459,11 +3466,9 @@ PREPARE q_col_fallback AS
         )::numeric, 4)::float8 AS "score"
     FROM cand c
     LEFT JOIN LATERAL (
-            SELECT ts_rank(nb."ai_search_tsv", to_tsquery('simple', $7)) * 100
-                + (CASE WHEN nb."ai_search_tsv" @@ to_tsquery('simple', $8) THEN 500 ELSE 0 END) AS boost
-            FROM "news_articles" nb
-            WHERE nb."id" = c."id"
-              AND nb."ai_search_tsv" IS NOT NULL AND nb."ai_search_tsv" @@ to_tsquery('simple', $9)
+            SELECT ts_rank(c."ai_search_tsv", to_tsquery('simple', $7)) * 100
+                + (CASE WHEN c."ai_search_tsv" @@ to_tsquery('simple', $8) THEN 500 ELSE 0 END) AS boost
+            WHERE c."ai_search_tsv" IS NOT NULL AND c."ai_search_tsv" @@ to_tsquery('simple', $9)
         ) ai ON true
     ORDER BY "score" DESC, c."publishedAt" DESC NULLS LAST, c."id" DESC;
 
