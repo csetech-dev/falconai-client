@@ -193,6 +193,13 @@ services:
       X_LANE_COOLDOWN_SECONDS: "${X_LANE_COOLDOWN_SECONDS:-300}"
       CORE_SERVICE_URL: ${CORE_INTERNAL_URL:-http://falcon-core-automation:4000}
       X_LANE_PLATFORM: TWITTER
+      # Keep self-heal + health sidecar env on the ghcr overlay so a replace
+      # of the environment map cannot drop them (day-2 Waitress starvation).
+      X_LANE_STUCK_SECONDS: ${X_LANE_STUCK_SECONDS:-210}
+      X_LANE_STUCK_CHECK_INTERVAL: ${X_LANE_STUCK_CHECK_INTERVAL:-30}
+      X_CDP_TEARDOWN_TIMEOUT: ${X_CDP_TEARDOWN_TIMEOUT:-5}
+      X_CDP_FAULT_HEAL_THRESHOLD: ${X_CDP_FAULT_HEAL_THRESHOLD:-2}
+      X_HEALTH_PORT: ${X_HEALTH_PORT:-3019}
 
   web-worker:
     <<: [*ghcr-image, *web-worker-command]

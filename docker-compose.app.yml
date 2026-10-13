@@ -1321,7 +1321,7 @@ services:
       - CMD
       - curl
       - -f
-      - http://localhost:3013/
+      - http://localhost:3019/health
     deploy:
       resources:
         limits:

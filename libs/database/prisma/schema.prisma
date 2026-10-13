@@ -1633,6 +1633,10 @@ model NewsArticle {
   // Set when an AI automation worker claims this row (status -> PROCESSING).
   // NewsArticle has no updatedAt, so this is what the stale-claim reaper uses.
   aiAnalysisClaimedAt  DateTime?
+  /// "backfill" once the oldest-first AI dispatch lane has claimed this row.
+  /// Never cleared, so a retry through either lane still counts as backfill;
+  /// analysis of such a row must not send notifications. Null = main lane.
+  aiAnalysisLane       String?
   /// Denormalized copy of this article's most recent NewsAIAnalysis row's
   /// overallSentimentLabel — set at analysis-write time (news.service.ts's
   /// analyzeArticle, technical-panel.service.ts's internal-AI webhook
