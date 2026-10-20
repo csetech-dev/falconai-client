@@ -383,7 +383,13 @@ main() {
       run_psql -v ON_ERROR_STOP=1 -f - < "${ROOT_DIR}/scripts/performance/apply-performance-schema.sql"
       # The live search layer (search_tsv helpers, triggers, GIN/hnsw indexes),
       # a copy of prod. Own session, own try-lock, own post-check.
-      run_psql -v ON_ERROR_STOP=1 -f - < "${ROOT_DIR}/scripts/performance/apply-search-tsv-schema.sql"
+      # FALCON_HNSW_MAINT_WORK_MEM: session maintenance_work_mem for the hnsw
+      # builds (default 1GB in the SQL; only ever raised).
+      local hnsw_mem_args=()
+      if [[ -n "${FALCON_HNSW_MAINT_WORK_MEM:-}" ]]; then
+        hnsw_mem_args=(-v "hnsw_maintenance_work_mem=${FALCON_HNSW_MAINT_WORK_MEM}")
+      fi
+      run_psql -v ON_ERROR_STOP=1 ${hnsw_mem_args[@]+"${hnsw_mem_args[@]}"} -f - < "${ROOT_DIR}/scripts/performance/apply-search-tsv-schema.sql"
       ok "Performance schema applied. Check GET /api/v1/health/ready on both core planes, then set PERFORMANCE_SCHEMA_MODE=verify."
       ;;
     perf-inspect)

@@ -356,6 +356,21 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS post_ai_analysis_search_tsv_gin_idx ON p
 
 CREATE INDEX CONCURRENTLY IF NOT EXISTS video_segments_search_tsv_gin_idx ON video_segments USING gin (search_tsv);
 
+-- hnsw build memory. pgvector keeps the graph in maintenance_work_mem; once it
+-- outgrows it ("hnsw graph no longer fits into maintenance_work_mem") the rest
+-- of the build is much slower. At the test-profile 256MB that happens after
+-- ~28k 1024-dim title embeddings (prod deploy, 2026-10-21). Raised for this
+-- session only and never lowered, so a server already above it keeps its
+-- value. The build is serial (above), so this is process memory, not /dev/shm.
+-- Default 1GB fits the smallest Postgres container (test profile: 4G limit,
+-- 1GB shared_buffers). Override: FALCON_HNSW_MAINT_WORK_MEM=2GB db.sh perf-schema
+\if :{?hnsw_maintenance_work_mem}
+\else
+\set hnsw_maintenance_work_mem '1GB'
+\endif
+SELECT set_config('maintenance_work_mem', :'hnsw_maintenance_work_mem', false) AS hnsw_maintenance_work_mem
+ WHERE pg_size_bytes(current_setting('maintenance_work_mem')) < pg_size_bytes(:'hnsw_maintenance_work_mem');
+
 -- hnsw (pgvector >= 0.5): only where the vector extension is installed AND the
 -- column exists with type vector. psql \if, because CREATE INDEX CONCURRENTLY
 -- cannot run inside a DO block. A database without pgvector skips them.
