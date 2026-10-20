@@ -870,6 +870,8 @@ model ScrapeJob {
   results   ScrapeResult[]
 
   @@index([campaignId])
+  // Latest job per profile (SocialService.findLatestJobsByCampaignIds).
+  @@index([campaignId, createdAt(sort: Desc)])
   @@index([postId])
   @@index([videoId])
   @@index([status])
