@@ -771,6 +771,7 @@ model Campaign {
   videos              Video[]
   videoSnapshots      VideoSnapshot[]
   profileGroupItems   ProfileGroupItem[]
+  engagementStats     CampaignEngagementStats?
   identityMember      ProfileIdentityMember?
 
   @@unique([platform, username])
@@ -2303,6 +2304,7 @@ model PostComment {
   // (CONCURRENTLY); declared here so `db push` does not drop it.
   @@index([postId, scrapedAt])
   @@index([ownerCampaignId, postedAt])
+  @@index([createdAt])
   @@map("post_comments")
 }
 
@@ -2363,7 +2365,26 @@ model PostReaction {
   @@index([postId])
   @@index([reactionType])
   @@index([reactorCampaignId])
+  @@index([createdAt])
   @@map("post_reactions")
+}
+
+// Precomputed outbound engagement per profile (comments/reactions it left on
+// other profiles' posts). Maintained by CampaignEngagementStatsService —
+// incremental refresh every few minutes plus a nightly full rebuild — so the
+// Investigation modal (GET /profile-groups/ungrouped) can sort by engagement
+// without aggregating post_comments / post_reactions on every request.
+model CampaignEngagementStats {
+  campaignId             String   @id
+  campaign               Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  outboundCommentsCount  Int      @default(0)
+  outboundReactionsCount Int      @default(0)
+  engagedPostsCount      Int      @default(0) // distinct posts commented on or reacted to
+  engagedProfilesCount   Int      @default(0) // distinct post owners engaged with
+  refreshedAt            DateTime @default(now())
+
+  @@index([refreshedAt])
+  @@map("campaign_engagement_stats")
 }
 
 model PostReactionSummary {

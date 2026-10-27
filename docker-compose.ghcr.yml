@@ -1,11 +1,11 @@
 # Pull pre-built FalconAI images from GHCR (no source build on client).
 #
 # Requires in .env.app (or shell):
-#   GHCR_IMAGE_PREFIX=ghcr.io/<your-org>/falconai
+#   GHCR_IMAGE_PREFIX=git.4sightdigi.com/cse-tech/falconai
 #   FALCON_IMAGE_TAG=latest          # main builds; a branch channel (e.g. stage) or a commit SHA to pin
 #
 # Usage (application stack):
-#   docker login ghcr.io -u <user> --password-stdin
+#   docker login git.4sightdigi.com -u <forgejo-user> --password-stdin
 #   docker compose --env-file .env.app \
 #     -f docker-compose.app.yml -f docker-compose.ghcr.yml pull
 #   docker compose --env-file .env.app \

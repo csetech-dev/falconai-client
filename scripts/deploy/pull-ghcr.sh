@@ -2,13 +2,13 @@
 # Pull pre-built images from GHCR and restart the stack (no git, no build).
 #
 # Required env (via .env.app or export):
-#   GHCR_IMAGE_PREFIX=ghcr.io/<org>/falconai
+#   GHCR_IMAGE_PREFIX=git.4sightdigi.com/cse-tech/falconai
 # Optional:
 #   FALCON_IMAGE_TAG=latest
 #   COMPOSE_FILES="-f docker-compose.app.yml"   # default: app split stack
 #
 # Example:
-#   export GHCR_IMAGE_PREFIX=ghcr.io/myorg/falconai
+#   export GHCR_IMAGE_PREFIX=git.4sightdigi.com/cse-tech/falconai
 #   ./scripts/deploy/pull-ghcr.sh
 set -euo pipefail
 
@@ -33,7 +33,7 @@ if [[ -f "${ENV_FILE}" ]]; then
   ENV_ARGS=(--env-file "${SIZING_ENV_FILE}" --env-file "${ENV_FILE}" --env-file "${ROOT_DIR}/.env.app.runtime")
 fi
 
-[[ -n "${GHCR_IMAGE_PREFIX:-}" ]] || die "GHCR_IMAGE_PREFIX is not set (e.g. ghcr.io/your-org/falconai)"
+[[ -n "${GHCR_IMAGE_PREFIX:-}" ]] || die "GHCR_IMAGE_PREFIX is not set (e.g. git.4sightdigi.com/cse-tech/falconai)"
 
 export FALCON_DEPLOY_DIR="${FALCON_DEPLOY_DIR:-${ROOT_DIR}}"
 bash "${SCRIPT_DIR}/init-client-data.sh"

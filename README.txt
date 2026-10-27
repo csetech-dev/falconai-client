@@ -26,7 +26,7 @@ App host:
   cp .env.app.example .env.app
   nano .env.app          # set STORAGE_SERVER_IP to this host's LAN IP
   # place infra/wireguard/app/wg0.conf (see WireGuard step above)
-  echo "$TOKEN" | docker login ghcr.io -u GITHUB_USER --password-stdin
+  echo "$TOKEN" | docker login git.4sightdigi.com -u FORGEJO_USER --password-stdin
   make deploy-ghcr
 
 Full guide: docs/GHCR_DEPLOY.md (in vendor repo)
