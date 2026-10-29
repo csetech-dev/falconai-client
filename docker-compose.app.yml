@@ -911,8 +911,10 @@ services:
       MINIO_USE_SSL: 'false'
       MINIO_PUBLIC_ENDPOINT: ${MINIO_PUBLIC_ENDPOINT:-localhost:12004}
       MINIO_PUBLIC_USE_SSL: 'false'
-      # Comment-fetch thread pool width (scraper.py / backupscrapper.py).
-      FB_SCRAPE_THREADS: ${FB_SCRAPE_THREADS:-16}
+      # Comment-fetch parallelism PER ACCOUNT (scraper.py). Keep at 1: a real
+      # browser loads comment pages one after another; parallel bursts on one
+      # account's cookies are a top checkpoint trigger.
+      FB_SCRAPE_THREADS: ${FB_SCRAPE_THREADS:-1}
       FB_METRICS_CONCURRENCY: ${FB_METRICS_CONCURRENCY:-4}
       # Multi-account routing — per-lane VNC login + scrape
       FB_MULTI_ACCOUNT_ENABLED: "true"

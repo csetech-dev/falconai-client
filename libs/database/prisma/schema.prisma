@@ -334,6 +334,7 @@ model User {
   campaigns         Campaign[]
   keywords          Keyword[]
   keywordCategories KeywordCategory[]
+  caseFilings       CaseFiling[]
   newsMedia         NewsMedia[]
   groups            Group[]
 
@@ -1459,6 +1460,68 @@ model KeywordAutomationLog {
   @@index([categoryId])
   @@index([createdAt])
   @@map("keyword_automation_logs")
+}
+
+// ============================================
+// CASE FILING — SCHEDULED WEB INVESTIGATIONS
+// ============================================
+
+/// An analyst-owned, time-bounded investigation. Each scheduled collection is
+/// written to CaseFilingRun so a case remains an auditable record, rather than
+/// a transient browser-search session.
+model CaseFiling {
+  id              String   @id @default(cuid())
+  userId          String
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title           String
+  keywords        String[]
+  platforms       String[]
+  startAt         DateTime
+  endAt           DateTime
+  intervalMinutes Int      @default(120)
+  status          String   @default("ACTIVE") // ACTIVE | PAUSED | COMPLETED | CANCELLED
+  lastRunAt       DateTime?
+  nextRunAt       DateTime?
+  lastError       String?  @db.Text
+  createdBy       String
+  deletedAt       DateTime?
+  deletedBy       String?
+  statusBeforeDelete String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  runs CaseFilingRun[]
+
+  @@index([userId, status])
+  @@index([userId, deletedAt, updatedAt])
+  @@index([deletedAt])
+  @@index([status, nextRunAt])
+  @@index([endAt])
+  @@map("case_filings")
+}
+
+/// One web-worker execution. `payload` and `result` preserve the raw, normalized
+/// data returned by the worker so historical case evidence remains viewable.
+model CaseFilingRun {
+  id              String      @id @default(cuid())
+  caseId          String
+  case            CaseFiling  @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  workerJobId     String?     @unique
+  status          String      @default("QUEUED") // QUEUED | RUNNING | CAPTCHA | COMPLETED | FAILED | CANCELLED
+  requestedAt     DateTime    @default(now())
+  startedAt       DateTime?
+  finishedAt      DateTime?
+  resultCount     Int         @default(0)
+  payload         Json?
+  result          Json?
+  captchaRequired Boolean     @default(false)
+  captchaViewerUrl String?
+  captchaSegment  String?
+  error           String?     @db.Text
+
+  @@index([caseId, requestedAt])
+  @@index([status, requestedAt])
+  @@map("case_filing_runs")
 }
 
 model CampaignKeyword {
@@ -3699,6 +3762,9 @@ model ReportTemplate {
   /// has not signed the deliverable off. Excluded from the catalogue
   /// rather than deleted, so enabling one is a flag, not a redeploy.
   isHidden           Boolean                @default(false)
+  /// An administrator moved this custom preset into the shared catalogue: it
+  /// shows on its category's tab for everyone and leaves its owner's My presets.
+  isPublished        Boolean                @default(false)
   createdAt          DateTime               @default(now())
   updatedAt          DateTime               @updatedAt
 
