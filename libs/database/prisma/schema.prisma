@@ -1490,7 +1490,8 @@ model CaseFiling {
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
-  runs CaseFilingRun[]
+  runs     CaseFilingRun[]
+  analyses CaseFilingAnalysis[]
 
   @@index([userId, status])
   @@index([userId, deletedAt, updatedAt])
@@ -1522,6 +1523,43 @@ model CaseFilingRun {
   @@index([caseId, requestedAt])
   @@index([status, requestedAt])
   @@map("case_filing_runs")
+}
+
+/// One AI investigation pass over everything a case has collected so far.
+///
+/// `folders` is the case file the analyst reads: folders, the issues inside each,
+/// and for every issue the ids of the evidence it rests on. `evidence` holds a
+/// snapshot of those items keyed by that id, so an old analysis still shows the
+/// sources it was written from after the collection runs have moved on. The
+/// newest COMPLETED row is the case's current file; older rows are the history.
+model CaseFilingAnalysis {
+  id               String     @id @default(cuid())
+  caseId           String
+  case             CaseFiling @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  status           String     @default("RUNNING") // RUNNING | COMPLETED | FAILED
+  trigger          String     @default("SCHEDULED") // SCHEDULED | MANUAL
+  /// Which model and prompt wrote this row (see ai-provenance.util): a change in
+  /// quality can then be traced to a provider or a prompt edit.
+  modelProvider    String?
+  modelName        String?
+  promptVersion    String?
+  promptHash       String?
+  generationMeta   Json?
+  evidenceCount    Int        @default(0)
+  newEvidenceCount Int        @default(0)
+  /// Newest completed collection run this pass read, so the next pass can tell what is new.
+  basedOnRunId     String?
+  summary          String?    @db.Text
+  folders          Json?
+  evidence         Json?
+  rawResponse      String?    @db.Text
+  error            String?    @db.Text
+  startedAt        DateTime   @default(now())
+  finishedAt       DateTime?
+
+  @@index([caseId, startedAt])
+  @@index([status, startedAt])
+  @@map("case_filing_analyses")
 }
 
 model CampaignKeyword {

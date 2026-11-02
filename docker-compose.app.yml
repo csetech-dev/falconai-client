@@ -1360,6 +1360,8 @@ services:
       REDIS_HOST: falcon-redis
       REDIS_PORT: 6379
       TELEGRAM_SESSION_DIR: /app/sessions
+      TELEGRAM_LANE_PROFILE_ROOT: /app/lanes
+      TELEGRAM_LANE_NOVNC_URL_TEMPLATE: "${TELEGRAM_LANE_NOVNC_URL_TEMPLATE:-/viewer/telegram/lane/{port}/vnc.html?autoconnect=1&resize=scale&path=viewer/telegram/lane/{port}/websockify}"
       TELEGRAM_API_ID: ${TELEGRAM_API_ID:-}
       TELEGRAM_API_HASH: ${TELEGRAM_API_HASH:-}
       TELEGRAM_PHONE: ${TELEGRAM_PHONE:-}
@@ -1369,6 +1371,7 @@ services:
     shm_size: "${FALCON_SZ_TG_SHM:-256mb}"
     volumes:
     - telegram_sessions:/app/sessions
+    - telegram_lanes:/app/lanes
     depends_on:
       redis:
         condition: service_started
@@ -1763,6 +1766,7 @@ services:
     - falcon-net
 volumes:
   telegram_sessions: null
+  telegram_lanes: null
   worker_news_outputs: null
   redis_data: null
   opensearch_data: null
