@@ -1100,7 +1100,7 @@ services:
     # here is substituted by Compose from .env/host env instead — where it is
     # undefined — and gunicorn dies with "argument -w/--workers: expected one
     # argument". The Dockerfile CMD needs no escaping; only compose does.
-    - 'rm -f /tmp/.X99-lock /tmp/.X11-unix/X99; mkdir -p $${NEWS_VNC_PROFILE_DIR:-/app/news_vnc_profile}; Xvfb :99 -screen 0 1280x800x16 -ac >/tmp/xvfb.log 2>&1 & while [ ! -S /tmp/.X11-unix/X99 ]; do sleep 0.2; done; export DISPLAY=:99; if command -v xset >/dev/null 2>&1; then xset s off -dpms s noblank; fi; openbox >/tmp/openbox.log 2>&1 & x11vnc -display :99 -forever -shared -nopw -noxdamage -xkb -repeat -defer 10 -listen 0.0.0.0 -rfbport 5900 >/tmp/x11vnc.log 2>&1 & websockify --web=/usr/share/novnc/ 7900 localhost:5900 >/tmp/websockify.log 2>&1 & exec gunicorn -c gunicorn_conf.py --bind 0.0.0.0:$${PORT} --workers $${WORKERS} --threads $${THREADS} --timeout $${GUNICORN_TIMEOUT} --graceful-timeout $${GUNICORN_GRACEFUL_TIMEOUT} --max-requests $${GUNICORN_MAX_REQUESTS} --max-requests-jitter $${GUNICORN_MAX_REQUESTS_JITTER} app:app'
+    - 'rm -f /tmp/.X99-lock /tmp/.X11-unix/X99; mkdir -p $${NEWS_VNC_PROFILE_DIR:-/app/news_vnc_profile}; Xvfb :99 -screen 0 1280x800x16 -ac >/tmp/xvfb.log 2>&1 & while [ ! -S /tmp/.X11-unix/X99 ]; do sleep 0.2; done; export DISPLAY=:99; if command -v xset >/dev/null 2>&1; then xset s off -dpms s noblank; fi; openbox >/tmp/openbox.log 2>&1 & x11vnc -display :99 -forever -shared -nopw -noxdamage -xkb -repeat -defer 10 -localhost -rfbport 5900 >/tmp/x11vnc.log 2>&1 & websockify --web=/usr/share/novnc/ 7900 localhost:5900 >/tmp/websockify.log 2>&1 & exec gunicorn -c gunicorn_conf.py --bind 0.0.0.0:$${PORT} --workers $${WORKERS} --threads $${THREADS} --timeout $${GUNICORN_TIMEOUT} --graceful-timeout $${GUNICORN_GRACEFUL_TIMEOUT} --max-requests $${GUNICORN_MAX_REQUESTS} --max-requests-jitter $${GUNICORN_MAX_REQUESTS_JITTER} app:app'
     ports:
     - 12080:3012
     environment:
@@ -1302,8 +1302,8 @@ services:
     - 'mkdir -p /app/x_chrome_profile /app/lanes && chown -R root:root /app/x_chrome_profile;
       Xvfb :99 -screen 0 1920x1080x24 -ac >/tmp/xvfb.log 2>&1 & while [ ! -S /tmp/.X11-unix/X99
       ]; do sleep 0.2; done; export DISPLAY=:99; openbox --config-file /app/openbox-rc.xml
-      >/tmp/openbox.log 2>&1 & x11vnc -display :99 -forever -shared -nopw -listen
-      0.0.0.0 -rfbport 5900 >/tmp/x11vnc.log 2>&1 & websockify --web=/usr/share/novnc/
+      >/tmp/openbox.log 2>&1 & x11vnc -display :99 -forever -shared -nopw -localhost
+      -rfbport 5900 >/tmp/x11vnc.log 2>&1 & websockify --web=/usr/share/novnc/
       7900 localhost:5900 >/tmp/websockify.log 2>&1 & run-py app
 
       '
@@ -1668,8 +1668,8 @@ services:
     - 'mkdir -p /app/internal-ai-profile && chown -R root:root /app/internal-ai-profile;
       Xvfb :99 -screen 0 1920x1080x24 -ac >/tmp/xvfb.log 2>&1 & while [ ! -S /tmp/.X11-unix/X99
       ]; do sleep 0.2; done; export DISPLAY=:99; openbox --config-file /app/openbox-rc.xml
-      >/tmp/openbox.log 2>&1 & x11vnc -display :99 -forever -shared -nopw -listen
-      0.0.0.0 -rfbport 5900 >/tmp/x11vnc.log 2>&1 & websockify --web=/usr/share/novnc/
+      >/tmp/openbox.log 2>&1 & x11vnc -display :99 -forever -shared -nopw -localhost
+      -rfbport 5900 >/tmp/x11vnc.log 2>&1 & websockify --web=/usr/share/novnc/
       7900 localhost:5900 >/tmp/websockify.log 2>&1 & run-py api
 
       '

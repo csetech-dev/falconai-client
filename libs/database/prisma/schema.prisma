@@ -354,8 +354,33 @@ model User {
   chatThreads         ChatThread[]
   aiChatUsage         AiChatUsage[]
   sessions            UserSession[]
+  responsibilityAcks  ResponsibilityAcknowledgment[]
 
   @@map("users")
+}
+
+enum AcknowledgmentDecision {
+  ACCEPTED
+  REJECTED
+}
+
+/// One row per answer to the "User Responsibility Acknowledgment" modal the
+/// web app shows before anything else. A user must have ACCEPTED the current
+/// text version within the last 7 days (see core-service
+/// users/responsibility-acknowledgment.service.ts); REJECTED rows are kept as
+/// the record that the user declined and was signed out. Both are also in the
+/// audit trail, which holds the IP address and user agent.
+model ResponsibilityAcknowledgment {
+  id        String                 @id @default(cuid())
+  userId    String
+  user      User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// Version of the acknowledgment text that was shown, e.g. "2026-11-03".
+  version   String
+  decision  AcknowledgmentDecision
+  createdAt DateTime               @default(now())
+
+  @@index([userId, decision, createdAt])
+  @@map("responsibility_acknowledgments")
 }
 
 /// One row per authenticated device/browser. Created at token issuance, rotated on
