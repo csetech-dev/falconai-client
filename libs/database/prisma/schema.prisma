@@ -354,6 +354,7 @@ model User {
   chatThreads         ChatThread[]
   aiChatUsage         AiChatUsage[]
   sessions            UserSession[]
+  keywordAnalyses     KeywordAnalysis[]
   responsibilityAcks  ResponsibilityAcknowledgment[]
 
   @@map("users")
@@ -2079,6 +2080,36 @@ model NewsSearchPanelCache {
   @@index([campaignId])
   @@index([expiresAt])
   @@map("news_search_panel_cache")
+}
+
+// Saved history of Keyword Analysis runs. Every successful grounded analysis on
+// the /keywords page is auto-persisted here so it can be reopened later without
+// re-running the ~19s AI call. `result` holds the full grounded payload
+// (issue_overview, current_situation, key_entities, locations, warnings,
+// references_inventory, grounding_stats) exactly as returned to the page.
+model KeywordAnalysis {
+  id    String  @id @default(cuid())
+  // Owner. Nullable so a run by a service principal (no users row) still saves;
+  // SetNull keeps the history row if the user is later deleted.
+  userId String?
+  user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  query String @db.Text
+  mode  String @default("local") // 'local' (News & Social grounded) | 'web'
+  scope Json? // AnalysisScopeSelection used for the run (tiers/outlets/platforms/date)
+
+  result Json // Full grounded result payload as shown on the page
+
+  sourceCount    Int @default(0) // references_inventory length
+  claimsTotal    Int @default(0) // grounding_stats.claims_total
+  claimsGrounded Int @default(0) // grounding_stats.claims_grounded
+  executionMs    Int? // AI execution_time in ms, when known
+
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([createdAt])
+  @@map("keyword_analyses")
 }
 
 // Individual group identification
