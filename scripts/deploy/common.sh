@@ -414,6 +414,33 @@ wireguard_enabled() {
   esac
 }
 
+# Monitoring exporters on the storage stack (P1.7a). Opt-in: default OFF.
+monitoring_enabled() {
+  case "${MONITORING_ENABLED:-false}" in
+    true|TRUE|True|1|yes|on) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# Refuse to publish the storage exporters beyond loopback unless TLS + basic
+# auth are configured (P1.7b PR 1, docs/db/scaling/p1-7b-1-exporter-tls.md).
+# Reads MONITORING_BIND_IP, EXPORTER_WEB_CONFIG, EXPORTER_TLS_DIR, ROOT_DIR.
+monitoring_exposure_check() {
+  local bind="${MONITORING_BIND_IP:-127.0.0.1}"
+  case "${bind}" in
+    127.0.0.1|localhost) return 0 ;;
+  esac
+  if [[ -z "${EXPORTER_WEB_CONFIG:-}" ]]; then
+    die "MONITORING_BIND_IP=${bind} would publish the exporters without TLS + password. Run scripts/deploy/monitoring-exporter-tls.sh and set EXPORTER_WEB_CONFIG=/etc/exporter-tls/web-config.yml (docs/db/scaling/p1-7b-1-exporter-tls.md)."
+  fi
+  local dir="${EXPORTER_TLS_DIR:-./infra/monitoring/exporter-tls}"
+  [[ "${dir}" = /* ]] || dir="${ROOT_DIR:-.}/${dir#./}"
+  local cfg="${dir}/web-config.yml"
+  [[ -f "${cfg}" ]] || die "MONITORING_BIND_IP=${bind} but ${cfg} does not exist. Run scripts/deploy/monitoring-exporter-tls.sh first."
+  grep -q '^tls_server_config:' "${cfg}" || die "${cfg} has no tls_server_config: refusing to publish the exporters without TLS."
+  grep -q '^basic_auth_users:' "${cfg}" || die "${cfg} has no basic_auth_users: refusing to publish the exporters without a password."
+}
+
 # Append a profile to COMPOSE_PROFILES (idempotent, comma-separated).
 add_compose_profile() {
   local p="$1"

@@ -97,6 +97,79 @@ services:
       options:
         max-size: 10m
         max-file: '3'
+  # ---------------------------------------------------------------------------
+  # Monitoring exporters (docs/db/DATABASE_SCALING_PLAN.md, P1.7a / P1.7b).
+  # Off by default: they start only with the `monitoring` profile
+  # (MONITORING_ENABLED=true in .env.storage, or `--profile monitoring`).
+  # Both run on the HOST network so the host firewall (ufw) applies to their
+  # ports; they listen on MONITORING_BIND_IP (default 127.0.0.1).
+  # postgres-exporter logs in as a read-only pg_monitor role
+  # (scripts/performance/create-monitor-role.sql) via the port Postgres
+  # already publishes on this host.
+  # TLS + password: scripts/deploy/monitoring-exporter-tls.sh, then
+  # EXPORTER_WEB_CONFIG=/etc/exporter-tls/web-config.yml. deploy-storage.sh
+  # refuses a non-loopback MONITORING_BIND_IP without it.
+  # Runbooks: docs/db/scaling/p1-7a-exporters.md, p1-7b-1-exporter-tls.md
+  # ---------------------------------------------------------------------------
+  postgres-exporter:
+    image: ${POSTGRES_EXPORTER_IMAGE:-prometheuscommunity/postgres-exporter:v0.17.1}
+    container_name: falcon-postgres-exporter
+    restart: unless-stopped
+    profiles:
+    - monitoring
+    depends_on:
+      postgres:
+        condition: service_healthy
+    network_mode: host
+    environment:
+      DATA_SOURCE_URI: 127.0.0.1:${POSTGRES_PORT:-12002}/${POSTGRES_DB:-falcon_ai}?sslmode=disable&application_name=falcon-postgres-exporter
+      DATA_SOURCE_USER: ${MONITOR_DB_USER:-falcon_monitor}
+      # Optional here on purpose: compose reads every service's variables even
+      # when its profile is off. deploy-storage.sh refuses to start the
+      # profile without it.
+      DATA_SOURCE_PASS: ${MONITOR_DB_PASSWORD:-}
+    command:
+    - --web.listen-address=${MONITORING_BIND_IP:-127.0.0.1}:${POSTGRES_EXPORTER_PORT:-9187}
+    - --web.config.file=${EXPORTER_WEB_CONFIG:-}
+    volumes:
+    - ${EXPORTER_TLS_DIR:-./infra/monitoring/exporter-tls}:/etc/exporter-tls:ro
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+          cpus: '0.25'
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '3'
+  node-exporter:
+    image: ${NODE_EXPORTER_IMAGE:-prom/node-exporter:v1.9.1}
+    container_name: falcon-node-exporter
+    restart: unless-stopped
+    profiles:
+    - monitoring
+    # Host network + host PID so CPU, memory, disk and network figures are the
+    # storage host's, not the container's.
+    network_mode: host
+    pid: host
+    command:
+    - --path.rootfs=/host
+    - --web.listen-address=${MONITORING_BIND_IP:-127.0.0.1}:${NODE_EXPORTER_PORT:-9100}
+    - --web.config.file=${EXPORTER_WEB_CONFIG:-}
+    volumes:
+    - /:/host:ro,rslave
+    - ${EXPORTER_TLS_DIR:-./infra/monitoring/exporter-tls}:/etc/exporter-tls:ro
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+          cpus: '0.25'
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '3'
   minio-init:
     image: minio/mc:latest
     container_name: falcon-minio-init

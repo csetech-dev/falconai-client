@@ -33,6 +33,16 @@ else
   warn "Set WIREGUARD_ENABLED=true (or remove it) to encrypt the app<->storage link."
 fi
 
+# Monitoring exporters (P1.7a): opt-in. Off unless MONITORING_ENABLED=true.
+if monitoring_enabled; then
+  if [[ -z "${MONITOR_DB_PASSWORD:-}" ]]; then
+    die "MONITORING_ENABLED=true but MONITOR_DB_PASSWORD is empty in ${ENV_FILE}. Create the role first: docs/db/scaling/p1-7a-exporters.md"
+  fi
+  monitoring_exposure_check
+  add_compose_profile monitoring
+  log "Monitoring exporters ENABLED (postgres-exporter, node-exporter on ${MONITORING_BIND_IP:-127.0.0.1})."
+fi
+
 storage_compose_args
 
 log "Pulling storage images..."
