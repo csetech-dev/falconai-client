@@ -1,0 +1,94 @@
+# Monitoring stack for the APP host (scaling plan P1.7b PR 2).
+# Started ONLY by scripts/deploy/deploy-monitoring.sh; app deploys never start, stop or recreate it.
+# No host ports: Grafana is reached through the gateway (P1.7b PR 3), Prometheus/Alertmanager only
+# from inside the Docker network. Settings, configs and secrets live in /etc/falcon-monitoring/ (outside
+# the bundle). The config DIRECTORY is mounted (not single files) so a re-render is seen after a restart.
+# Runbook: docs/db/scaling/p1-7b-2-monitoring-stack.md
+name: falcon-monitoring
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: 10m
+    max-file: '3'
+
+services:
+  prometheus:
+    image: ${PROMETHEUS_IMAGE:-prom/prometheus:v3.4.1}
+    container_name: falcon-prometheus
+    restart: unless-stopped
+    command:
+    - --config.file=/etc/falcon-config/prometheus.yml
+    - --storage.tsdb.path=/prometheus
+    - --storage.tsdb.retention.time=30d
+    - --storage.tsdb.retention.size=${PROMETHEUS_RETENTION_SIZE:-10GB}
+    volumes:
+    - ${MONITORING_CONFIG_DIR:-/etc/falcon-monitoring/config}:/etc/falcon-config:ro
+    - ${MONITORING_SECRETS_DIR:-/etc/falcon-monitoring/secrets}:/run/falcon-secrets:ro
+    - prometheus_data:/prometheus
+    deploy:
+      resources:
+        limits:
+          memory: ${PROMETHEUS_MEM:-1536M}
+          cpus: '${PROMETHEUS_CPU:-1.0}'
+    logging: *default-logging
+    networks:
+    - app
+
+  alertmanager:
+    image: ${ALERTMANAGER_IMAGE:-prom/alertmanager:v0.28.1}
+    container_name: falcon-alertmanager
+    restart: unless-stopped
+    command:
+    - --config.file=/etc/falcon-config/alertmanager.yml
+    - --storage.path=/alertmanager
+    volumes:
+    - ${MONITORING_CONFIG_DIR:-/etc/falcon-monitoring/config}:/etc/falcon-config:ro
+    - ${MONITORING_SECRETS_DIR:-/etc/falcon-monitoring/secrets}:/run/falcon-secrets:ro
+    - alertmanager_data:/alertmanager
+    deploy:
+      resources:
+        limits:
+          memory: ${ALERTMANAGER_MEM:-128M}
+          cpus: '${ALERTMANAGER_CPU:-0.25}'
+    logging: *default-logging
+    networks:
+    - app
+
+  grafana:
+    image: ${GRAFANA_IMAGE:-grafana/grafana:12.0.2}
+    container_name: falcon-grafana
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD__FILE: /run/falcon-secrets/grafana_admin_password
+      GF_SERVER_ROOT_URL: '%(protocol)s://%(domain)s/grafana/'
+      GF_SERVER_SERVE_FROM_SUB_PATH: 'true'
+      GF_SECURITY_COOKIE_SECURE: 'true'
+      GF_AUTH_ANONYMOUS_ENABLED: 'false'
+      GF_USERS_ALLOW_SIGN_UP: 'false'
+      GF_ANALYTICS_REPORTING_ENABLED: 'false'
+      GF_ANALYTICS_CHECK_FOR_UPDATES: 'false'
+    volumes:
+    - ./infra/monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+    - ${MONITORING_SECRETS_DIR:-/etc/falcon-monitoring/secrets}:/run/falcon-secrets:ro
+    - grafana_data:/var/lib/grafana
+    depends_on:
+    - prometheus
+    deploy:
+      resources:
+        limits:
+          memory: ${GRAFANA_MEM:-512M}
+          cpus: '${GRAFANA_CPU:-0.5}'
+    logging: *default-logging
+    networks:
+    - app
+
+volumes:
+  prometheus_data:
+  alertmanager_data:
+  grafana_data:
+
+networks:
+  app:
+    external: true
+    name: ${MONITORING_APP_NETWORK:-falcon-app_falcon-net}

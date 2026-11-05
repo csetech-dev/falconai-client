@@ -1,0 +1,59 @@
+# Rendered by scripts/deploy/monitoring-render.sh into ${MONITORING_CONFIG_DIR}/prometheus.yml
+# (scaling plan P1.7b PR 2). Secrets are read from files; no value appears here.
+global:
+  scrape_interval: 30s
+  scrape_timeout: 10s
+  evaluation_interval: 30s
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ['alertmanager:9093']
+
+scrape_configs:
+  - job_name: prometheus
+    static_configs:
+      - targets: ['localhost:9090']
+
+  - job_name: alertmanager
+    static_configs:
+      - targets: ['alertmanager:9093']
+
+  - job_name: falcon-core
+    metrics_path: /internal/metrics
+    authorization:
+      type: Bearer
+      credentials_file: /run/falcon-secrets/metrics_token
+    static_configs:
+      - targets: ['falcon-core:4000']
+
+  - job_name: falcon-search
+    metrics_path: /internal/metrics
+    authorization:
+      type: Bearer
+      credentials_file: /run/falcon-secrets/metrics_token
+    static_configs:
+      - targets: ['search-service:4000']
+
+  # Storage exporters: TLS + basic auth (P1.7b PR 1, docs/db/scaling/p1-7b-1-exporter-tls.md).
+  - job_name: postgres
+    scrape_interval: 60s
+    scrape_timeout: 20s
+    scheme: https
+    tls_config:
+      ca_file: /run/falcon-secrets/storage_ca.crt
+    basic_auth:
+      username: falcon_scrape
+      password_file: /run/falcon-secrets/storage_exporter_password
+    static_configs:
+      - targets: ['@@STORAGE_SERVER_IP@@:@@POSTGRES_EXPORTER_PORT@@']
+
+  - job_name: node-storage
+    scheme: https
+    tls_config:
+      ca_file: /run/falcon-secrets/storage_ca.crt
+    basic_auth:
+      username: falcon_scrape
+      password_file: /run/falcon-secrets/storage_exporter_password
+    static_configs:
+      - targets: ['@@STORAGE_SERVER_IP@@:@@NODE_EXPORTER_PORT@@']
