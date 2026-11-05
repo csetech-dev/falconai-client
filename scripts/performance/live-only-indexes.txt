@@ -50,3 +50,6 @@ news_articles_ai_search_tsv_gin_idx
 
 # --- speaker voice matching (libs/database/prisma/migrations/20261002000000_voice_profile_verify)
 idx_voice_profiles_emb
+
+# --- connection tree / engagement report (scripts/performance/apply-performance-schema.sql)
+post_comments_author_norm_idx

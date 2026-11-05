@@ -33,7 +33,7 @@ END $$;
 DO $$ BEGIN
  IF EXISTS (SELECT 1 FROM pg_index i JOIN pg_class c ON c.oid=i.indexrelid
  JOIN pg_namespace n ON n.oid=c.relnamespace
- WHERE n.nspname=current_schema() AND NOT i.indisvalid AND c.relname IN ('keywords_lower_keyword_trgm_idx', 'keywords_lower_keyword_idx', 'news_ai_analysis_trendingKeywords_coalesce_gin_idx', 'news_ai_analysis_topTopics_coalesce_gin_idx', 'news_ai_analysis_summary_trgm_idx', 'news_ai_analysis_what_happened_trgm_idx', 'news_ai_analysis_where_happened_trgm_idx', 'news_ai_analysis_who_involved_trgm_idx', 'news_ai_analysis_between_whom_trgm_idx', 'news_ai_analysis_why_happened_trgm_idx', 'news_ai_analysis_root_cause_trgm_idx', 'news_ai_analysis_what_impact_trgm_idx', 'news_ai_analysis_future_implication_trgm_idx', 'news_ai_analysis_search_tsv_gin_idx', 'news_articles_search_tsv_gin_idx', 'news_articles_category_trgm_idx', 'news_articles_status_published_desc_nl_idx', 'news_articles_fts_expr_idx', 'news_articles_ai_search_tsv_gin_idx'))
+ WHERE n.nspname=current_schema() AND NOT i.indisvalid AND c.relname IN ('keywords_lower_keyword_trgm_idx', 'keywords_lower_keyword_idx', 'news_ai_analysis_trendingKeywords_coalesce_gin_idx', 'news_ai_analysis_topTopics_coalesce_gin_idx', 'news_ai_analysis_summary_trgm_idx', 'news_ai_analysis_what_happened_trgm_idx', 'news_ai_analysis_where_happened_trgm_idx', 'news_ai_analysis_who_involved_trgm_idx', 'news_ai_analysis_between_whom_trgm_idx', 'news_ai_analysis_why_happened_trgm_idx', 'news_ai_analysis_root_cause_trgm_idx', 'news_ai_analysis_what_impact_trgm_idx', 'news_ai_analysis_future_implication_trgm_idx', 'news_ai_analysis_search_tsv_gin_idx', 'news_articles_search_tsv_gin_idx', 'news_articles_category_trgm_idx', 'news_articles_status_published_desc_nl_idx', 'news_articles_fts_expr_idx', 'news_articles_ai_search_tsv_gin_idx', 'post_comments_author_norm_idx'))
  THEN RAISE EXCEPTION 'Invalid performance index found. Drop ONLY the invalid named index CONCURRENTLY, then rerun.'; END IF;
 END $$;
 CREATE INDEX CONCURRENTLY IF NOT EXISTS "keywords_lower_keyword_trgm_idx" ON "keywords" USING GIN (LOWER("keyword") gin_trgm_ops);
@@ -278,6 +278,12 @@ $$;
 
 CREATE INDEX CONCURRENTLY IF NOT EXISTS "news_articles_ai_search_tsv_gin_idx" ON "news_articles" USING GIN ("ai_search_tsv") WHERE "ai_search_tsv" IS NOT NULL;
 
+-- Connection tree / engagement report (apps/falcon-analytics): "comments the
+-- target wrote" is matched on the normalised author name. Must stay identical
+-- to AUTHOR_NORM_SQL in apps/falcon-analytics/src/services/engagement-identity.js,
+-- or the planner cannot use it and the lookup goes back to a full scan.
+CREATE INDEX CONCURRENTLY IF NOT EXISTS "post_comments_author_norm_idx" ON "post_comments" (lower(ltrim(btrim("authorUsername"), '@')));
+
 -- Post-check: every performance object must now exist and be usable. A build
 -- that ended INVALID (or was never created) fails the run with a non-zero exit
 -- naming it, so a deploy that re-applies this file after `prisma db push`
@@ -288,7 +294,7 @@ DECLARE
 BEGIN
  SELECT string_agg(want.name || CASE WHEN c.oid IS NULL THEN ' (missing)' ELSE ' (INVALID)' END, ', ' ORDER BY want.name)
  INTO bad
- FROM unnest(ARRAY['keywords_lower_keyword_trgm_idx', 'keywords_lower_keyword_idx', 'news_ai_analysis_trendingKeywords_coalesce_gin_idx', 'news_ai_analysis_topTopics_coalesce_gin_idx', 'news_ai_analysis_summary_trgm_idx', 'news_ai_analysis_what_happened_trgm_idx', 'news_ai_analysis_where_happened_trgm_idx', 'news_ai_analysis_who_involved_trgm_idx', 'news_ai_analysis_between_whom_trgm_idx', 'news_ai_analysis_why_happened_trgm_idx', 'news_ai_analysis_root_cause_trgm_idx', 'news_ai_analysis_what_impact_trgm_idx', 'news_ai_analysis_future_implication_trgm_idx', 'news_ai_analysis_search_tsv_gin_idx', 'news_articles_search_tsv_gin_idx', 'news_articles_category_trgm_idx', 'news_articles_status_published_desc_nl_idx', 'news_articles_fts_expr_idx', 'news_articles_ai_search_tsv_gin_idx']) AS want(name)
+ FROM unnest(ARRAY['keywords_lower_keyword_trgm_idx', 'keywords_lower_keyword_idx', 'news_ai_analysis_trendingKeywords_coalesce_gin_idx', 'news_ai_analysis_topTopics_coalesce_gin_idx', 'news_ai_analysis_summary_trgm_idx', 'news_ai_analysis_what_happened_trgm_idx', 'news_ai_analysis_where_happened_trgm_idx', 'news_ai_analysis_who_involved_trgm_idx', 'news_ai_analysis_between_whom_trgm_idx', 'news_ai_analysis_why_happened_trgm_idx', 'news_ai_analysis_root_cause_trgm_idx', 'news_ai_analysis_what_impact_trgm_idx', 'news_ai_analysis_future_implication_trgm_idx', 'news_ai_analysis_search_tsv_gin_idx', 'news_articles_search_tsv_gin_idx', 'news_articles_category_trgm_idx', 'news_articles_status_published_desc_nl_idx', 'news_articles_fts_expr_idx', 'news_articles_ai_search_tsv_gin_idx', 'post_comments_author_norm_idx']) AS want(name)
  LEFT JOIN pg_namespace n ON n.nspname = current_schema()
  LEFT JOIN pg_class c ON c.relname = want.name AND c.relnamespace = n.oid
  LEFT JOIN pg_index i ON i.indexrelid = c.oid
@@ -303,6 +309,6 @@ BEGIN
       AND tgname IN ('trg_news_ai_analysis_article_tsv_ins', 'trg_news_ai_analysis_article_tsv_upd', 'trg_news_ai_analysis_article_tsv_del')) <> 3 THEN
   RAISE EXCEPTION 'Performance schema incomplete: a trg_news_ai_analysis_article_tsv_* trigger (ins/upd/del) is missing or disabled.';
  END IF;
- RAISE NOTICE 'Performance schema OK: 19 indexes valid, triggers trg_news_ai_analysis_search_tsv and trg_news_ai_analysis_article_tsv_{ins,upd,del} enabled.';
+ RAISE NOTICE 'Performance schema OK: 20 indexes valid, triggers trg_news_ai_analysis_search_tsv and trg_news_ai_analysis_article_tsv_{ins,upd,del} enabled.';
 END $$;
 SELECT pg_advisory_unlock(hashtext('falcon-performance-schema'));
