@@ -39,6 +39,9 @@ AM_IMAGE="${ALERTMANAGER_IMAGE:-prom/alertmanager:v0.28.1}"
 
 log "Checking settings and secrets..."
 monitoring_check_inputs
+# Compose builds Grafana's root URL as ${MONITORING_PUBLIC_URL}/grafana/: drop a trailing slash.
+# (A value exported here takes precedence over the same key in --env-file.)
+export MONITORING_PUBLIC_URL="${MONITORING_PUBLIC_URL%/}"
 monitoring_check_secrets
 
 if ! docker network inspect "${APP_NETWORK}" >/dev/null 2>&1; then

@@ -4,7 +4,7 @@
 #
 # Reads: MONITORING_SECRETS_DIR (default /etc/falcon-monitoring/secrets)
 #        MONITORING_CONFIG_DIR  (default /etc/falcon-monitoring/config)
-#        STORAGE_SERVER_IP, POSTGRES_EXPORTER_PORT (9187), NODE_EXPORTER_PORT (9100), TELEGRAM_CHAT_ID
+#        STORAGE_SERVER_IP, MONITORING_PUBLIC_URL, POSTGRES_EXPORTER_PORT (9187), NODE_EXPORTER_PORT (9100), TELEGRAM_CHAT_ID
 # Secrets are files, each owned by the container user that reads it, never world-readable:
 #   metrics_token, storage_exporter_password, storage_ca.crt, telegram_bot_token (optional) -> uid 65534
 #   grafana_admin_password                                                                  -> uid 472
@@ -54,6 +54,10 @@ monitoring_check_secrets() {
 monitoring_check_inputs() {
   _mon_valid_ipv4 "${STORAGE_SERVER_IP:-}" || \
     _mon_die "STORAGE_SERVER_IP must be the storage server's IPv4 address (got '${STORAGE_SERVER_IP:-}'); the exporters' certificate is issued for that IP"
+  local url="${MONITORING_PUBLIC_URL:-}"
+  url="${url%/}"
+  [[ "$url" =~ ^https://[A-Za-z0-9.-]+(:[0-9]+)?$ ]] || \
+    _mon_die "MONITORING_PUBLIC_URL must be the site's public https:// address with no path, e.g. https://app1.example.com (got '${MONITORING_PUBLIC_URL:-}'); Grafana is served at <it>/grafana/"
   local token="${MONITORING_SECRETS_DIR:-/etc/falcon-monitoring/secrets}/telegram_bot_token"
   if [[ -n "${TELEGRAM_CHAT_ID:-}" && ! -e "$token" ]]; then
     _mon_die "TELEGRAM_CHAT_ID is set but ${token} does not exist; create telegram_bot_token or clear TELEGRAM_CHAT_ID"

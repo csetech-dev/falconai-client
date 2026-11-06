@@ -61,8 +61,20 @@ services:
     restart: unless-stopped
     environment:
       GF_SECURITY_ADMIN_PASSWORD__FILE: /run/falcon-secrets/grafana_admin_password
-      GF_SERVER_ROOT_URL: '%(protocol)s://%(domain)s/grafana/'
+      GF_SERVER_ROOT_URL: '${MONITORING_PUBLIC_URL}/grafana/'
       GF_SERVER_SERVE_FROM_SUB_PATH: 'true'
+      # Sign-in = FalconAI (P1.7b PR 3): the gateway checks the admin's FalconAI session with falcon-auth
+      # and passes the verified user/role in these headers; Grafana's own login is disabled.
+      GF_AUTH_PROXY_ENABLED: 'true'
+      GF_AUTH_PROXY_HEADER_NAME: X-WEBAUTH-USER
+      GF_AUTH_PROXY_HEADER_PROPERTY: username
+      GF_AUTH_PROXY_AUTO_SIGN_UP: 'true'
+      # Login = FalconAI user id (immutable); Name/Email are display only.
+      GF_AUTH_PROXY_HEADERS: 'Name:X-WEBAUTH-NAME Email:X-WEBAUTH-EMAIL Role:X-WEBAUTH-ROLE'
+      # Grafana shares the FalconAI origin (localStorage tokens): strict CSP limits what injected script can do.
+      GF_SECURITY_CONTENT_SECURITY_POLICY: 'true'
+      GF_AUTH_DISABLE_LOGIN_FORM: 'true'
+      GF_AUTH_DISABLE_SIGNOUT_MENU: 'true'
       GF_SECURITY_COOKIE_SECURE: 'true'
       GF_AUTH_ANONYMOUS_ENABLED: 'false'
       GF_USERS_ALLOW_SIGN_UP: 'false'
