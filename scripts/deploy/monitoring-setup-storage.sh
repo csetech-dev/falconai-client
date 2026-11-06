@@ -185,7 +185,9 @@ else
   if wireguard_enabled; then export STORAGE_BIND_IP="127.0.0.1"; else export STORAGE_BIND_IP="0.0.0.0"; fi
   DC=("${COMPOSE[@]}" --env-file "$SIZING_ENV_FILE" --env-file "$ENV_FILE" -f "${ROOT_DIR}/docker-compose.storage.yml" --profile monitoring)
   [[ "$TLS_CHANGED" -eq 1 ]] && export EXPORTER_TLS_DIR="$TLS_NEW"   # dry-run against the staged material
-  plan_rc=0; plan_out="$("${DC[@]}" up -d --no-deps --dry-run postgres-exporter node-exporter 2>&1)" || plan_rc=$?
+  # --force-recreate: the TLS folder is mounted by PATH. After a swap the path is the same, so a plain
+  # `up -d` sees no change and leaves the exporters on the old (deleted) folder (found on stage).
+  plan_rc=0; plan_out="$("${DC[@]}" up -d --no-deps --force-recreate --dry-run postgres-exporter node-exporter 2>&1)" || plan_rc=$?
   unset EXPORTER_TLS_DIR
   # Fail closed: the dry run must succeed and must show the exporters; anything else that would be
   # created/recreated/started/stopped/removed (a container other than the two exporters, a network,
@@ -204,7 +206,7 @@ else
     rm -rf "${TLS_DIR}.old"; [[ -d "$TLS_DIR" ]] && mv "$TLS_DIR" "${TLS_DIR}.old"
     mv "$TLS_NEW" "$TLS_DIR"; mv -f "$HANDOFF_NEW" "$HANDOFF_FILE"; rm -rf "${TLS_DIR}.old"
   fi
-  up_out="$("${DC[@]}" up -d --no-deps postgres-exporter node-exporter 2>&1)" || {
+  up_out="$("${DC[@]}" up -d --no-deps --force-recreate postgres-exporter node-exporter 2>&1)" || {
     echo "$up_out" >&2; msl_fail "$MSL_EXIT_VERIFY" "starting the exporters failed (above); re-run this script after fixing it"; }
   msl_step exporters changed "postgres-exporter + node-exporter (re)created"
 fi
@@ -235,6 +237,12 @@ fi
 # ---------------------------------------------------------------- 7. verify
 echo "== Verify"
 ok=1
+# Freshly (re)created exporters need a few seconds before they answer HTTPS: wait up to 30 s.
+for _ in $(seq 1 30); do
+  c="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 --cacert "${TLS_DIR}/ca.crt" "https://${STORAGE_IP}:9187/metrics" 2>/dev/null || true)"
+  [[ -n "$c" && "$c" != 000 ]] && break
+  sleep 1
+done
 check() { if eval "$2"; then echo "✅ $1"; else echo "❌ $1"; ok=0; fi; }
 CA="${TLS_DIR}/ca.crt"
 NETRC="$(mktemp)"; chmod 600 "$NETRC"
@@ -248,7 +256,7 @@ check "node exporter answers with password" '[[ "$(curl -s -o /dev/null -w "%{ht
 
 if [[ "$ok" -ne 1 ]]; then
   echo "Verify failed. Nothing was rolled back. To undo: set MONITORING_BIND_IP=127.0.0.1 and EXPORTER_WEB_CONFIG= in .env.storage, then"
-  echo "  docker compose --env-file ${SIZING_ENV_FILE:-.env.sizing.<profile>} --env-file .env.storage -f docker-compose.storage.yml --profile monitoring up -d --no-deps postgres-exporter node-exporter"
+  echo "  docker compose --env-file ${SIZING_ENV_FILE:-.env.sizing.<profile>} --env-file .env.storage -f docker-compose.storage.yml --profile monitoring up -d --no-deps --force-recreate postgres-exporter node-exporter"
   exit "$MSL_EXIT_VERIFY"
 fi
 
