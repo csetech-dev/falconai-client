@@ -261,7 +261,7 @@ if [[ "$ok" -ne 1 ]]; then
 fi
 
 echo "== Done."
-if [[ "$HANDOFF_CHANGED" -eq 1 ]]; then
+if [[ "$HANDOFF_CHANGED" -eq 1 && -z "${MSL_NO_HANDOFF_PRINT:-}" ]]; then  # rollout-storage.sh prints it itself, once
   echo "Next, on the APP server run monitoring-setup-app.sh --handoff - and paste this line when asked."
   echo "Then clear this screen (clear). Print it again any time with --print-handoff."
   msl_handoff_line "$HANDOFF_FILE"
