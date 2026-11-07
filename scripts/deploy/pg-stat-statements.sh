@@ -33,6 +33,9 @@ done
 msl_require_root
 [[ -n "$(docker ps --filter name='^falcon-postgres$' --format '{{.Names}}' 2>/dev/null)" ]] || \
   msl_fail "$MSL_EXIT_PREFLIGHT" "falcon-postgres is not running here; run this on the STORAGE server"
+project="$(docker inspect -f '{{index .Config.Labels "com.docker.compose.project"}}' falcon-postgres 2>/dev/null || true)"
+[[ "$project" == falcon-storage ]] || msl_fail "$MSL_EXIT_PREFLIGHT" \
+  "the falcon-postgres here belongs to compose project '${project:-none}', not 'falcon-storage'. Run this on the STORAGE server. Nothing changed"
 
 ENV_FILE="${ROOT_DIR}/.env.storage"
 PG_USER="$(msl_get_env_key "$ENV_FILE" POSTGRES_USER)"; PG_USER="${PG_USER:-postgres}"
@@ -62,9 +65,14 @@ preflight_restart() {
   local src; src="$(q "SELECT source FROM pg_settings WHERE name = 'shared_preload_libraries'")"
   [[ "$src" == default || "$src" == "configuration file" ]] || msl_fail "$MSL_EXIT_PREFLIGHT" \
     "shared_preload_libraries is set from the ${src} (e.g. -c in docker-compose), so ALTER SYSTEM would be ignored. Nothing changed"
-  local errs; errs="$(q "SELECT name || ': ' || error FROM pg_file_settings WHERE error IS NOT NULL")"
+  # A value overridden on the command line (docker-compose "-c max_connections=...") shows as "setting could not be
+  # applied" in pg_file_settings. That's harmless: a restart uses the same command line. Real errors still count.
+  local errs; errs="$(q "SELECT f.name || ': ' || f.error FROM pg_file_settings f LEFT JOIN pg_settings s ON s.name = f.name WHERE f.error IS NOT NULL AND NOT (f.error = 'setting could not be applied' AND s.source = 'command line')")"
   [[ -z "$errs" ]] || msl_fail "$MSL_EXIT_PREFLIGHT" \
-    "the config files already have errors, so a restart could fail; fix these first: ${errs}. Nothing changed"
+    "the config files have errors or changes waiting for a restart (a restart could fail or change more than planned); sort these out first: ${errs//$'\n'/; }. Nothing changed"
+  local pend; pend="$(q "SELECT string_agg(name, ', ') FROM pg_settings WHERE pending_restart")"
+  [[ -z "$pend" ]] || msl_fail "$MSL_EXIT_PREFLIGHT" \
+    "a restart would also apply these pending config changes: ${pend}. Find out who changed them and why first. Nothing changed"
 }
 
 wait_ready() {

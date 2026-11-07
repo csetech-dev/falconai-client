@@ -44,10 +44,12 @@ answers. Expect `✅ pg_stat_statements is on`.
 Exit codes:
 - `0` means done.
 - `2` means it refused before changing anything. Causes include:
-  - not root, or not the storage server;
+  - not root, or not the storage server. It checks that `falcon-postgres` belongs to the `falcon-storage` compose project, so
+    an old single-host `falcon-postgres` on the app server is refused;
   - the library missing from the image;
   - `shared_preload_libraries` set on the Postgres command line;
-  - existing errors in the config files;
+  - errors in the config files, or changes waiting for a restart that someone else made. A restart would apply those too.
+    Values overridden on the command line (`-c max_connections=…` in `docker-compose.storage.yml`) are expected and ignored;
   - you answering no.
 - `4` means the restart or the check failed. It prints the exact recovery commands, the same as in [Rollback](#rollback-if-postgresql-does-not-come-back).
 
