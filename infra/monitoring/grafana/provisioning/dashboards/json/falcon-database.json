@@ -1,0 +1,526 @@
+{
+  "uid": "falcon-database",
+  "title": "FalconAI · Database",
+  "description": "PostgreSQL health for FalconAI (scaling plan P1.7c)",
+  "tags": [
+    "falcon",
+    "p1.7c"
+  ],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": false,
+  "refresh": "1m",
+  "time": {
+    "from": "now-24h",
+    "to": "now"
+  },
+  "templating": {
+    "list": []
+  },
+  "annotations": {
+    "list": []
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "PostgreSQL up",
+      "type": "stat",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "falcon-prometheus"
+      },
+      "description": "UP = the exporter can query PostgreSQL",
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 4,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "falcon-prometheus"
+          },
+          "expr": "pg_up",
+          "legendFormat": ""
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          },
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "DOWN",
+                  "color": "red"
+                },
+                "1": {
+                  "text": "UP",
+                  "color": "green"
+                }
+              }
+            }
+          ]
+        },
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "id": 2,
+      "title": "Database size (falcon_ai)",
+      "type": "stat",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "falcon-prometheus"
+      },
+      "description": "",
+      "gridPos": {
+        "x": 4,
+        "y": 0,
+        "w": 5,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "falcon-prometheus"
+          },
+          "expr": "pg_database_size_bytes{datname=\"falcon_ai\"}",
+          "legendFormat": ""
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes"
+        },
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "id": 3,
+      "title": "Connections by state",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "falcon-prometheus"
+      },
+      "description": "Alert PostgresConnectionsHigh at 80% of max_connections",
+      "gridPos": {
+        "x": 9,
+        "y": 0,
+        "w": 15,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "falcon-prometheus"
+          },
+          "expr": "sum by (state) (pg_stat_activity_count)",
+          "legendFormat": "{{state}}"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "falcon-prometheus"
+          },
+          "expr": "max(pg_settings_max_connections)",
+          "legendFormat": "max_connections"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "id": 12,
+      "title": "Database growth (7 days)",
+      "type": "stat",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "falcon-prometheus"
+      },
+      "description": "Size change over the last 7 days (needs 7 days of history)",
+      "gridPos": {
+        "x": 4,
+        "y": 4,
+        "w": 5,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "falcon-prometheus"
+          },
+          "expr": "delta(pg_database_size_bytes{datname=\"falcon_ai\"}[7d])",
+          "legendFormat": ""
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes"
+        },
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "id": 4,
+      "title": "Database size over time",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "falcon-prometheus"
+      },
+      "description": "",
+      "gridPos": {
+        "x": 0,
+        "y": 4,
+        "w": 9,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "falcon-prometheus"
+          },
+          "expr": "pg_database_size_bytes{datname!~\"template0|template1|postgres\"}",
+          "legendFormat": "{{datname}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes"
+        },
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "id": 5,
+      "title": "Transactions per second",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "falcon-prometheus"
+      },
+      "description": "",
+      "gridPos": {
+        "x": 0,
+        "y": 12,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "falcon-prometheus"
+          },
+          "expr": "sum by (datname) (rate(pg_stat_database_xact_commit{datname!~\"template0|template1|postgres\"}[5m]))",
+          "legendFormat": "{{datname}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "id": 6,
+      "title": "Cache hit ratio",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "falcon-prometheus"
+      },
+      "description": "Alert PostgresCacheHitLow below 95%",
+      "gridPos": {
+        "x": 12,
+        "y": 12,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "falcon-prometheus"
+          },
+          "expr": "sum by (datname) (rate(pg_stat_database_blks_hit{datname!~\"template0|template1|postgres\"}[10m])) / (sum by (datname) (rate(pg_stat_database_blks_hit{datname!~\"template0|template1|postgres\"}[10m])) + sum by (datname) (rate(pg_stat_database_blks_read{datname!~\"template0|template1|postgres\"}[10m])))",
+          "legendFormat": "{{datname}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 0.95
+              }
+            ]
+          },
+          "custom": {
+            "thresholdsStyle": {
+              "mode": "line+area"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "id": 7,
+      "title": "Locks by mode",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "falcon-prometheus"
+      },
+      "description": "",
+      "gridPos": {
+        "x": 0,
+        "y": 20,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "falcon-prometheus"
+          },
+          "expr": "sum by (mode) (pg_locks_count)",
+          "legendFormat": "{{mode}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "id": 8,
+      "title": "Longest transaction",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "falcon-prometheus"
+      },
+      "description": "Alert PostgresLongTransaction above 5 minutes",
+      "gridPos": {
+        "x": 12,
+        "y": 20,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "falcon-prometheus"
+          },
+          "expr": "max by (state) (pg_stat_activity_max_tx_duration)",
+          "legendFormat": "{{state}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 300
+              }
+            ]
+          },
+          "custom": {
+            "thresholdsStyle": {
+              "mode": "line+area"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "id": 9,
+      "title": "Deadlocks (10 min)",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "falcon-prometheus"
+      },
+      "description": "",
+      "gridPos": {
+        "x": 0,
+        "y": 28,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "falcon-prometheus"
+          },
+          "expr": "increase(pg_stat_database_deadlocks{datname!~\"template0|template1|postgres\"}[10m])",
+          "legendFormat": "{{datname}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "id": 10,
+      "title": "Top 10 tables by dead rows",
+      "type": "table",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "falcon-prometheus"
+      },
+      "description": "",
+      "gridPos": {
+        "x": 12,
+        "y": 28,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "falcon-prometheus"
+          },
+          "expr": "topk(10, pg_stat_user_tables_n_dead_tup)",
+          "legendFormat": "",
+          "instant": true,
+          "format": "table"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {},
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "__name__": true,
+              "instance": true,
+              "job": true
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": 11,
+      "title": "Hours since last autovacuum (top 10)",
+      "type": "table",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "falcon-prometheus"
+      },
+      "description": "Tables never autovacuumed are left out",
+      "gridPos": {
+        "x": 0,
+        "y": 36,
+        "w": 24,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "falcon-prometheus"
+          },
+          "expr": "topk(10, (time() - (pg_stat_user_tables_last_autovacuum > 0)) / 3600)",
+          "legendFormat": "",
+          "instant": true,
+          "format": "table"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {},
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "__name__": true,
+              "instance": true,
+              "job": true
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

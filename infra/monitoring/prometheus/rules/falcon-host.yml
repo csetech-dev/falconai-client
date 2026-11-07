@@ -1,0 +1,43 @@
+# Alert rules: monitoring targets and the storage host (scaling plan P1.7c). Thresholds approved 2026-11-06.
+groups:
+  - name: falcon-host
+    rules:
+      - alert: MonitoringTargetDown
+        expr: up == 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Monitoring target {{ $labels.job }} is down"
+          description: "Prometheus cannot scrape {{ $labels.job }} ({{ $labels.instance }}) for 5 minutes."
+          runbook: "https://git.4sightdigi.com/CSE-TECH/FalconAI/src/branch/main/docs/db/scaling/p1-7c-alerts.md#monitoringtargetdown"
+
+      - alert: StorageDiskFillingWarning
+        expr: (1 - node_filesystem_avail_bytes{job="node-storage",mountpoint="/"} / node_filesystem_size_bytes{job="node-storage",mountpoint="/"}) > 0.70
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Storage server disk over 70% used"
+          description: "/ on the storage server is {{ $value | humanizePercentage }} used."
+          runbook: "https://git.4sightdigi.com/CSE-TECH/FalconAI/src/branch/main/docs/db/scaling/p1-7c-alerts.md#storagediskfilling"
+
+      - alert: StorageDiskFillingCritical
+        expr: (1 - node_filesystem_avail_bytes{job="node-storage",mountpoint="/"} / node_filesystem_size_bytes{job="node-storage",mountpoint="/"}) > 0.85
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Storage server disk over 85% used"
+          description: "/ on the storage server is {{ $value | humanizePercentage }} used. Postgres stops when the disk is full."
+          runbook: "https://git.4sightdigi.com/CSE-TECH/FalconAI/src/branch/main/docs/db/scaling/p1-7c-alerts.md#storagediskfilling"
+
+      - alert: StorageMemoryLow
+        expr: node_memory_MemAvailable_bytes{job="node-storage"} / node_memory_MemTotal_bytes{job="node-storage"} < 0.1
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Storage server memory below 10% available"
+          description: "Only {{ $value | humanizePercentage }} of memory available on the storage server for 10 minutes."
+          runbook: "https://git.4sightdigi.com/CSE-TECH/FalconAI/src/branch/main/docs/db/scaling/p1-7c-alerts.md#storagememorylow"

@@ -82,6 +82,48 @@ Use the site's public `https://` address, with no path.
 
 3. Open FalconAI as an admin and go to **Administration → Monitoring**. You land in Grafana with no second login.
 
+## Dashboards and alerts (P1.7c): rollout on a server that already has monitoring
+
+On the **app server**:
+
+1. Get the files:
+
+   ```bash
+   cd /opt/falconai-client && git pull --ff-only
+   ```
+
+2. Run the checks. They include the alert-rule unit tests, run in the real Prometheus image. Nothing restarts:
+
+   ```bash
+   sudo bash scripts/deploy/deploy-monitoring.sh --check-only
+   ```
+
+   Expect `SUCCESS` from `check config`, from `check rules` (3 files, 14 rules) and from `test rules` (3 files), then
+   `Check only: nothing started`. Stop on any `FAILED`.
+
+3. Apply. Prometheus, Alertmanager and Grafana restart, which is a few seconds without graphs. Prometheus loads the rules, and
+   Grafana loads the dashboards:
+
+   ```bash
+   sudo bash scripts/deploy/deploy-monitoring.sh
+   ```
+
+4. Verify the rules loaded. Expect `14 rules, health: {'ok'}` and `firing: []`.
+   - If the app doesn't have `METRICS_TOKEN` yet (see the setup NOTE), `MonitoringTargetDown` fires for `falcon-core` /
+     `falcon-search` until the next app deploy. That's expected.
+   - A real alert is explained in `docs/db/scaling/p1-7c-alerts.md`.
+
+   ```bash
+   docker exec falcon-prometheus wget -qO- http://localhost:9090/api/v1/rules | python3 -c 'import json,sys; g=json.load(sys.stdin)["data"]["groups"]; r=[x for gg in g for x in gg["rules"]]; print(len(r), "rules, health:", {x["health"] for x in r}); print("firing:", [x["name"] for x in r if x.get("state")=="firing"])'
+   ```
+
+5. In FalconAI, open **Administration → Monitoring**, then Grafana → **Dashboards → FalconAI**. Expect 3 dashboards: Database,
+   Storage host, Reliability.
+   - These dashboards are read-only in Grafana; change them in the repo.
+   - The **Reliability** dashboard has the fixed uid `falcon-reliability`, so it replaces any copy imported by hand earlier.
+
+What each alert means and what to do: `docs/db/scaling/p1-7c-alerts.md`.
+
 ## Exit codes
 
 | Code | Meaning | What to do |

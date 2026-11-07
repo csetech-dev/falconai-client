@@ -1,0 +1,12 @@
+# Grafana dashboards (scaling plan P1.7c): loaded from files, read-only in the UI.
+# Change them in the repo (infra/monitoring/grafana/provisioning/dashboards/json/), not in Grafana.
+apiVersion: 1
+providers:
+  - name: falcon
+    type: file
+    folder: FalconAI
+    disableDeletion: true
+    allowUiUpdates: false
+    updateIntervalSeconds: 60
+    options:
+      path: /etc/grafana/provisioning/dashboards/json

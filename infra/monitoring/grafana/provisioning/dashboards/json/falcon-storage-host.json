@@ -1,0 +1,285 @@
+{
+  "uid": "falcon-storage-host",
+  "title": "FalconAI · Storage host",
+  "description": "Storage server resources (scaling plan P1.7c)",
+  "tags": [
+    "falcon",
+    "p1.7c"
+  ],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": false,
+  "refresh": "1m",
+  "time": {
+    "from": "now-24h",
+    "to": "now"
+  },
+  "templating": {
+    "list": []
+  },
+  "annotations": {
+    "list": []
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Disk used (/)",
+      "type": "gauge",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "falcon-prometheus"
+      },
+      "description": "Alerts at 70% (warning) and 85% (critical)",
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 6,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "falcon-prometheus"
+          },
+          "expr": "1 - node_filesystem_avail_bytes{job=\"node-storage\",mountpoint=\"/\"} / node_filesystem_size_bytes{job=\"node-storage\",mountpoint=\"/\"}",
+          "legendFormat": ""
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 0.7
+              },
+              {
+                "color": "red",
+                "value": 0.85
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "id": 2,
+      "title": "Disk used over time (/)",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "falcon-prometheus"
+      },
+      "description": "",
+      "gridPos": {
+        "x": 6,
+        "y": 0,
+        "w": 18,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "falcon-prometheus"
+          },
+          "expr": "1 - node_filesystem_avail_bytes{job=\"node-storage\",mountpoint=\"/\"} / node_filesystem_size_bytes{job=\"node-storage\",mountpoint=\"/\"}",
+          "legendFormat": "used"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 0.7
+              },
+              {
+                "color": "red",
+                "value": 0.85
+              }
+            ]
+          },
+          "custom": {
+            "thresholdsStyle": {
+              "mode": "line+area"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "id": 3,
+      "title": "Disk free (/)",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "falcon-prometheus"
+      },
+      "description": "",
+      "gridPos": {
+        "x": 0,
+        "y": 8,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "falcon-prometheus"
+          },
+          "expr": "node_filesystem_avail_bytes{job=\"node-storage\",mountpoint=\"/\"}",
+          "legendFormat": "free"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes"
+        },
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "id": 4,
+      "title": "CPU busy",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "falcon-prometheus"
+      },
+      "description": "",
+      "gridPos": {
+        "x": 12,
+        "y": 8,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "falcon-prometheus"
+          },
+          "expr": "1 - avg(rate(node_cpu_seconds_total{job=\"node-storage\",mode=\"idle\"}[5m]))",
+          "legendFormat": "busy"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "id": 5,
+      "title": "Memory available",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "falcon-prometheus"
+      },
+      "description": "",
+      "gridPos": {
+        "x": 0,
+        "y": 16,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "falcon-prometheus"
+          },
+          "expr": "node_memory_MemAvailable_bytes{job=\"node-storage\"} / node_memory_MemTotal_bytes{job=\"node-storage\"}",
+          "legendFormat": "available"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 0.1
+              }
+            ]
+          },
+          "custom": {
+            "thresholdsStyle": {
+              "mode": "line+area"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "id": 6,
+      "title": "Load (1 min)",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "falcon-prometheus"
+      },
+      "description": "",
+      "gridPos": {
+        "x": 12,
+        "y": 16,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "falcon-prometheus"
+          },
+          "expr": "node_load1{job=\"node-storage\"}",
+          "legendFormat": "load1"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {}
+    }
+  ]
+}

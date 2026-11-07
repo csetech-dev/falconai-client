@@ -53,9 +53,24 @@ log "Rendering configs into ${MONITORING_CONFIG_DIR}..."
 monitoring_render
 
 log "Validating configs (promtool, amtool)..."
+RULES_DIR="${ROOT_DIR}/infra/monitoring/prometheus/rules"
+RULE_TESTS_DIR="${ROOT_DIR}/infra/monitoring/prometheus/rules-tests"
 docker run --rm --entrypoint promtool \
   -v "${MONITORING_CONFIG_DIR}:/etc/falcon-config:ro" -v "${MONITORING_SECRETS_DIR}:/run/falcon-secrets:ro" \
+  -v "${RULES_DIR}:/etc/prometheus/rules:ro" \
   "${PROM_IMAGE}" check config /etc/falcon-config/prometheus.yml
+# Alert rules (P1.7c): syntax, then unit tests (each alert fires and stays quiet as designed).
+rule_files=(); for f in "${RULES_DIR}"/*.yml; do [[ -e "$f" ]] && rule_files+=("/etc/prometheus/rules/$(basename "$f")"); done
+test_files=(); for f in "${RULE_TESTS_DIR}"/*.test.yml; do [[ -e "$f" ]] && test_files+=("/etc/prometheus/rules-tests/$(basename "$f")"); done
+if [[ ${#rule_files[@]} -gt 0 ]]; then
+  docker run --rm --entrypoint promtool -v "${RULES_DIR}:/etc/prometheus/rules:ro" \
+    "${PROM_IMAGE}" check rules "${rule_files[@]}"
+fi
+if [[ ${#test_files[@]} -gt 0 ]]; then
+  docker run --rm --entrypoint promtool -w /etc/prometheus/rules-tests \
+    -v "${RULES_DIR}:/etc/prometheus/rules:ro" -v "${RULE_TESTS_DIR}:/etc/prometheus/rules-tests:ro" \
+    "${PROM_IMAGE}" test rules "${test_files[@]}"
+fi
 docker run --rm --entrypoint amtool \
   -v "${MONITORING_CONFIG_DIR}:/etc/falcon-config:ro" -v "${MONITORING_SECRETS_DIR}:/run/falcon-secrets:ro" \
   "${AM_IMAGE}" check-config /etc/falcon-config/alertmanager.yml
@@ -68,7 +83,8 @@ fi
 
 log "Starting the monitoring stack..."
 "${COMPOSE[@]}" --env-file "${ENV_FILE}" -f "${MONITORING_COMPOSE}" up -d
-# `up -d` leaves running containers alone when only the rendered files changed; restart the two that
-# read them so new settings (e.g. Telegram, STORAGE_SERVER_IP) take effect. Grafana is not restarted.
-"${COMPOSE[@]}" --env-file "${ENV_FILE}" -f "${MONITORING_COMPOSE}" restart prometheus alertmanager
+# `up -d` leaves running containers alone when only the rendered files changed; restart the ones that
+# read them so new settings (e.g. Telegram, STORAGE_SERVER_IP) take effect. Grafana too: it reads
+# dashboard *providers* (P1.7c) only at startup.
+"${COMPOSE[@]}" --env-file "${ENV_FILE}" -f "${MONITORING_COMPOSE}" restart prometheus alertmanager grafana
 ok "Monitoring stack started. Verify with docs/db/scaling/p1-7b-2-monitoring-stack.md step 5."

@@ -1,0 +1,141 @@
+# promtool unit tests for rules/falcon-database.yml (scaling plan P1.7c). Each alert: fires + stays quiet.
+rule_files:
+  - ../rules/falcon-database.yml
+evaluation_interval: 1m
+tests:
+  - interval: 1m
+    input_series:
+      - series: 'pg_up{instance="s:9187",job="postgres"}'
+        values: '0x10'
+      - series: 'pg_stat_activity_count{datname="falcon_ai",state="active",instance="s:9187",job="postgres"}'
+        values: '90x20'
+      - series: 'pg_settings_max_connections{instance="s:9187",job="postgres"}'
+        values: '100x20'
+      - series: 'pg_stat_activity_max_tx_duration{datname="falcon_ai",state="idle in transaction",instance="s:9187",job="postgres"}'
+        values: '400x10'
+      - series: 'pg_stat_database_deadlocks{datname="falcon_ai",instance="s:9187",job="postgres"}'
+        values: '0 0 0 1 1 1 1 1'
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: PostgresDown
+        exp_alerts:
+          - exp_labels: {severity: critical, instance: "s:9187", job: postgres}
+            exp_annotations: {summary: "PostgreSQL is not answering the exporter", description: "postgres-exporter on s:9187 cannot query PostgreSQL (pg_up = 0) for 2 minutes.", runbook: "https://git.4sightdigi.com/CSE-TECH/FalconAI/src/branch/main/docs/db/scaling/p1-7c-alerts.md#postgresdown"}
+      - eval_time: 12m
+        alertname: PostgresConnectionsHigh
+        exp_alerts:
+          - exp_labels: {severity: warning}
+            exp_annotations: {summary: "PostgreSQL connections above 80% of max_connections", description: "90% of max_connections in use for 10 minutes.", runbook: "https://git.4sightdigi.com/CSE-TECH/FalconAI/src/branch/main/docs/db/scaling/p1-7c-alerts.md#postgresconnectionshigh"}
+      - eval_time: 3m
+        alertname: PostgresLongTransaction
+        exp_alerts:
+          - exp_labels: {severity: warning, datname: falcon_ai, state: "idle in transaction"}
+            exp_annotations: {summary: "A transaction has been open for more than 5 minutes", description: "Longest 'idle in transaction' transaction in falcon_ai is 6m 40s old.", runbook: "https://git.4sightdigi.com/CSE-TECH/FalconAI/src/branch/main/docs/db/scaling/p1-7c-alerts.md#postgreslongtransaction"}
+      - eval_time: 5m
+        alertname: PostgresDeadlocks
+        exp_alerts:
+          - exp_labels: {severity: warning, datname: falcon_ai, instance: "s:9187", job: postgres}
+            exp_annotations: {summary: "Deadlocks in falcon_ai", description: "1 deadlock(s) in the last 10 minutes.", runbook: "https://git.4sightdigi.com/CSE-TECH/FalconAI/src/branch/main/docs/db/scaling/p1-7c-alerts.md#postgresdeadlocks"}
+
+  - interval: 1m
+    input_series:
+      - series: 'pg_up{instance="s:9187",job="postgres"}'
+        values: '1x10'
+      - series: 'pg_stat_activity_count{datname="falcon_ai",state="active",instance="s:9187",job="postgres"}'
+        values: '50x20'
+      - series: 'pg_settings_max_connections{instance="s:9187",job="postgres"}'
+        values: '100x20'
+      - series: 'pg_stat_activity_max_tx_duration{datname="falcon_ai",state="active",instance="s:9187",job="postgres"}'
+        values: '100x10'
+      - series: 'pg_stat_activity_max_tx_duration{datname="falcon_ai",state="idle",instance="s:9187",job="postgres"}'
+        values: '9999x10'
+      - series: 'pg_stat_database_deadlocks{datname="falcon_ai",instance="s:9187",job="postgres"}'
+        values: '3x10'
+    alert_rule_test:
+      - {eval_time: 3m, alertname: PostgresDown, exp_alerts: []}
+      - {eval_time: 12m, alertname: PostgresConnectionsHigh, exp_alerts: []}
+      - {eval_time: 3m, alertname: PostgresLongTransaction, exp_alerts: []}
+      - {eval_time: 5m, alertname: PostgresDeadlocks, exp_alerts: []}
+
+  # Dead rows and cache hit ratio (30m "for").
+  - interval: 1m
+    input_series:
+      - series: 'pg_stat_user_tables_n_dead_tup{datname="falcon_ai",schemaname="public",relname="social_posts",instance="s:9187",job="postgres"}'
+        values: '2000000x40'
+      - series: 'pg_stat_user_tables_n_live_tup{datname="falcon_ai",schemaname="public",relname="social_posts",instance="s:9187",job="postgres"}'
+        values: '5000000x40'
+      - series: 'pg_stat_user_tables_n_dead_tup{datname="falcon_ai",schemaname="public",relname="news_articles",instance="s:9187",job="postgres"}'
+        values: '2000000x40'
+      - series: 'pg_stat_user_tables_n_live_tup{datname="falcon_ai",schemaname="public",relname="news_articles",instance="s:9187",job="postgres"}'
+        values: '20000000x40'
+      - series: 'pg_stat_database_blks_hit{datname="falcon_ai",instance="s:9187",job="postgres"}'
+        values: '0+54000x40'
+      - series: 'pg_stat_database_blks_read{datname="falcon_ai",instance="s:9187",job="postgres"}'
+        values: '0+6000x40'
+    alert_rule_test:
+      - eval_time: 35m
+        alertname: PostgresDeadTuplesHigh
+        exp_alerts:
+          - exp_labels: {severity: warning, datname: falcon_ai, schemaname: public, relname: social_posts, instance: "s:9187", job: postgres}
+            exp_annotations: {summary: "Table social_posts has many dead rows", description: "public.social_posts has 2M dead rows (over 1M and over 20% of live rows) for 30 minutes.", runbook: "https://git.4sightdigi.com/CSE-TECH/FalconAI/src/branch/main/docs/db/scaling/p1-7c-alerts.md#postgresdeadtupleshigh"}
+      - eval_time: 35m
+        alertname: PostgresCacheHitLow
+        exp_alerts:
+          - exp_labels: {severity: warning, datname: falcon_ai}
+            exp_annotations: {summary: "PostgreSQL cache hit ratio below 95%", description: "Cache hit ratio for falcon_ai is 90% for 30 minutes (reads are going to disk).", runbook: "https://git.4sightdigi.com/CSE-TECH/FalconAI/src/branch/main/docs/db/scaling/p1-7c-alerts.md#postgrescachehitlow"}
+
+  - interval: 1m
+    input_series:
+      - series: 'pg_stat_user_tables_n_dead_tup{datname="falcon_ai",schemaname="public",relname="small",instance="s:9187",job="postgres"}'
+        values: '500x40'
+      - series: 'pg_stat_user_tables_n_live_tup{datname="falcon_ai",schemaname="public",relname="small",instance="s:9187",job="postgres"}'
+        values: '100x40'
+      - series: 'pg_stat_database_blks_hit{datname="falcon_ai",instance="s:9187",job="postgres"}'
+        values: '0+54000x40'
+      - series: 'pg_stat_database_blks_read{datname="falcon_ai",instance="s:9187",job="postgres"}'
+        values: '0+60x40'
+    alert_rule_test:
+      - {eval_time: 35m, alertname: PostgresDeadTuplesHigh, exp_alerts: []}
+      - {eval_time: 35m, alertname: PostgresCacheHitLow, exp_alerts: []}
+
+  # Autovacuum staleness needs time() past 7 days: per-minute samples over 8+ days
+  # (hourly samples would go stale between points, 5m lookback, and reset the 1h "for").
+  - interval: 1m
+    input_series:
+      - series: 'pg_stat_user_tables_last_autovacuum{datname="falcon_ai",schemaname="public",relname="post_comments",instance="s:9187",job="postgres"}'
+        values: '0x12000'
+      - series: 'pg_stat_user_tables_n_dead_tup{datname="falcon_ai",schemaname="public",relname="post_comments",instance="s:9187",job="postgres"}'
+        values: '200000x12000'
+      - series: 'pg_stat_user_tables_last_autovacuum{datname="falcon_ai",schemaname="public",relname="tiny",instance="s:9187",job="postgres"}'
+        values: '0x12000'
+      - series: 'pg_stat_user_tables_n_dead_tup{datname="falcon_ai",schemaname="public",relname="tiny",instance="s:9187",job="postgres"}'
+        values: '50000x12000'
+    alert_rule_test:
+      - eval_time: 172h
+        alertname: PostgresAutovacuumStale
+        exp_alerts:
+          - exp_labels: {severity: warning, datname: falcon_ai, schemaname: public, relname: post_comments, instance: "s:9187", job: postgres}
+            exp_annotations: {summary: "Table post_comments not autovacuumed for 7 days", description: "public.post_comments has over 100k dead rows and no autovacuum in 7 days (or never).", runbook: "https://git.4sightdigi.com/CSE-TECH/FalconAI/src/branch/main/docs/db/scaling/p1-7c-alerts.md#postgresautovacuumstale"}
+      - {eval_time: 100h, alertname: PostgresAutovacuumStale, exp_alerts: []}
+
+  # Aborted idle-in-transaction also holds locks and blocks vacuum: it must fire too.
+  - interval: 1m
+    input_series:
+      - series: 'pg_stat_activity_max_tx_duration{datname="falcon_ai",state="idle in transaction (aborted)",instance="s:9187",job="postgres"}'
+        values: '400x10'
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: PostgresLongTransaction
+        exp_alerts:
+          - exp_labels: {severity: warning, datname: falcon_ai, state: "idle in transaction (aborted)"}
+            exp_annotations: {summary: "A transaction has been open for more than 5 minutes", description: "Longest 'idle in transaction (aborted)' transaction in falcon_ai is 6m 40s old.", runbook: "https://git.4sightdigi.com/CSE-TECH/FalconAI/src/branch/main/docs/db/scaling/p1-7c-alerts.md#postgreslongtransaction"}
+
+  # Quiet night: a low hit ratio on almost no traffic (under 100 blocks/s) must not fire.
+  - interval: 1m
+    input_series:
+      - series: 'pg_stat_database_blks_hit{datname="falcon_ai",instance="s:9187",job="postgres"}'
+        values: '0+20x40'
+      - series: 'pg_stat_database_blks_read{datname="falcon_ai",instance="s:9187",job="postgres"}'
+        values: '0+5x40'
+    alert_rule_test:
+      - {eval_time: 35m, alertname: PostgresCacheHitLow, exp_alerts: []}

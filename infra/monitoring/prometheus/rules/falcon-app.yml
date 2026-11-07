@@ -1,0 +1,36 @@
+# Alert rules: FalconAI app services (scaling plan P1.7c). Thresholds approved 2026-11-06.
+groups:
+  - name: falcon-app
+    rules:
+      - alert: AppDatabasePoolTimeouts
+        expr: increase(falcon_database_pool_timeouts_total[5m]) > 0
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.job }} waited too long for a database connection"
+          description: "{{ $value | humanize }} database pool timeout(s) in 5 minutes on {{ $labels.job }}."
+          runbook: "https://git.4sightdigi.com/CSE-TECH/FalconAI/src/branch/main/docs/db/scaling/p1-7c-alerts.md#appdatabasepooltimeouts"
+
+      - alert: AppHttp5xxHigh
+        expr: >-
+          (sum by (service) (rate(falcon_http_request_duration_seconds_count{status=~"5.."}[5m]))
+           / sum by (service) (rate(falcon_http_request_duration_seconds_count[5m])) > 0.05)
+          and sum by (service) (rate(falcon_http_request_duration_seconds_count[5m])) > 1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.service }}: over 5% of requests fail with 5xx"
+          description: "{{ $value | humanizePercentage }} of {{ $labels.service }} requests returned 5xx for 5 minutes."
+          runbook: "https://git.4sightdigi.com/CSE-TECH/FalconAI/src/branch/main/docs/db/scaling/p1-7c-alerts.md#apphttp5xxhigh"
+
+      - alert: SearchUnavailable
+        expr: falcon_search_available == 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Search backend unavailable"
+          description: "search-service reports its search backend unavailable for 5 minutes."
+          runbook: "https://git.4sightdigi.com/CSE-TECH/FalconAI/src/branch/main/docs/db/scaling/p1-7c-alerts.md#searchunavailable"

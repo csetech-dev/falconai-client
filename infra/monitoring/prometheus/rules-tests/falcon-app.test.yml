@@ -1,0 +1,45 @@
+# promtool unit tests for rules/falcon-app.yml (scaling plan P1.7c). Each alert: fires + stays quiet.
+rule_files:
+  - ../rules/falcon-app.yml
+evaluation_interval: 1m
+tests:
+  - interval: 1m
+    input_series:
+      - series: 'falcon_database_pool_timeouts_total{instance="falcon-core:4000",job="falcon-core"}'
+        values: '0 0 0 2 2 2 2'
+      - series: 'falcon_http_request_duration_seconds_count{service="core",route="/api/x",method="GET",status="500",instance="falcon-core:4000",job="falcon-core"}'
+        values: '0+600x15'
+      - series: 'falcon_http_request_duration_seconds_count{service="core",route="/api/x",method="GET",status="200",instance="falcon-core:4000",job="falcon-core"}'
+        values: '0+1200x15'
+      - series: 'falcon_search_available{instance="search-service:4000",job="falcon-search"}'
+        values: '0x10'
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: AppDatabasePoolTimeouts
+        exp_alerts:
+          - exp_labels: {severity: warning, instance: "falcon-core:4000", job: falcon-core}
+            exp_annotations: {summary: "falcon-core waited too long for a database connection", description: "2 database pool timeout(s) in 5 minutes on falcon-core.", runbook: "https://git.4sightdigi.com/CSE-TECH/FalconAI/src/branch/main/docs/db/scaling/p1-7c-alerts.md#appdatabasepooltimeouts"}
+      - eval_time: 12m
+        alertname: AppHttp5xxHigh
+        exp_alerts:
+          - exp_labels: {severity: warning, service: core}
+            exp_annotations: {summary: "core: over 5% of requests fail with 5xx", description: "33.33% of core requests returned 5xx for 5 minutes.", runbook: "https://git.4sightdigi.com/CSE-TECH/FalconAI/src/branch/main/docs/db/scaling/p1-7c-alerts.md#apphttp5xxhigh"}
+      - eval_time: 6m
+        alertname: SearchUnavailable
+        exp_alerts:
+          - exp_labels: {severity: warning, instance: "search-service:4000", job: falcon-search}
+            exp_annotations: {summary: "Search backend unavailable", description: "search-service reports its search backend unavailable for 5 minutes.", runbook: "https://git.4sightdigi.com/CSE-TECH/FalconAI/src/branch/main/docs/db/scaling/p1-7c-alerts.md#searchunavailable"}
+
+  # Quiet: no timeouts, 5xx only on a trickle of traffic (under 1 req/s), search up.
+  - interval: 1m
+    input_series:
+      - series: 'falcon_database_pool_timeouts_total{instance="falcon-core:4000",job="falcon-core"}'
+        values: '4x7'
+      - series: 'falcon_http_request_duration_seconds_count{service="core",route="/api/x",method="GET",status="500",instance="falcon-core:4000",job="falcon-core"}'
+        values: '0+30x15'
+      - series: 'falcon_search_available{instance="search-service:4000",job="falcon-search"}'
+        values: '1x10'
+    alert_rule_test:
+      - {eval_time: 4m, alertname: AppDatabasePoolTimeouts, exp_alerts: []}
+      - {eval_time: 12m, alertname: AppHttp5xxHigh, exp_alerts: []}
+      - {eval_time: 6m, alertname: SearchUnavailable, exp_alerts: []}

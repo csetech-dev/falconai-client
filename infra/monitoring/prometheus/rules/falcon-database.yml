@@ -1,0 +1,79 @@
+# Alert rules: PostgreSQL (scaling plan P1.7c). Thresholds approved 2026-11-06.
+# Tested by infra/monitoring/prometheus/rules-tests/ (promtool test rules, run by deploy-monitoring.sh --check-only).
+groups:
+  - name: falcon-database
+    rules:
+      - alert: PostgresDown
+        expr: pg_up == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "PostgreSQL is not answering the exporter"
+          description: "postgres-exporter on {{ $labels.instance }} cannot query PostgreSQL (pg_up = 0) for 2 minutes."
+          runbook: "https://git.4sightdigi.com/CSE-TECH/FalconAI/src/branch/main/docs/db/scaling/p1-7c-alerts.md#postgresdown"
+
+      - alert: PostgresConnectionsHigh
+        expr: sum(pg_stat_activity_count) / max(pg_settings_max_connections) > 0.8
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "PostgreSQL connections above 80% of max_connections"
+          description: "{{ $value | humanizePercentage }} of max_connections in use for 10 minutes."
+          runbook: "https://git.4sightdigi.com/CSE-TECH/FalconAI/src/branch/main/docs/db/scaling/p1-7c-alerts.md#postgresconnectionshigh"
+
+      - alert: PostgresLongTransaction
+        expr: max by (datname, state) (pg_stat_activity_max_tx_duration{state=~"active|idle in transaction.*"}) > 300
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "A transaction has been open for more than 5 minutes"
+          description: "Longest '{{ $labels.state }}' transaction in {{ $labels.datname }} is {{ $value | humanizeDuration }} old."
+          runbook: "https://git.4sightdigi.com/CSE-TECH/FalconAI/src/branch/main/docs/db/scaling/p1-7c-alerts.md#postgreslongtransaction"
+
+      - alert: PostgresDeadTuplesHigh
+        expr: pg_stat_user_tables_n_dead_tup > 1000000 and pg_stat_user_tables_n_dead_tup > 0.2 * pg_stat_user_tables_n_live_tup
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Table {{ $labels.relname }} has many dead rows"
+          description: "{{ $labels.schemaname }}.{{ $labels.relname }} has {{ $value | humanize }} dead rows (over 1M and over 20% of live rows) for 30 minutes."
+          runbook: "https://git.4sightdigi.com/CSE-TECH/FalconAI/src/branch/main/docs/db/scaling/p1-7c-alerts.md#postgresdeadtupleshigh"
+
+      - alert: PostgresAutovacuumStale
+        expr: (time() - pg_stat_user_tables_last_autovacuum) > 604800 and pg_stat_user_tables_n_dead_tup > 100000
+        for: 1h
+        labels:
+          severity: warning
+        annotations:
+          summary: "Table {{ $labels.relname }} not autovacuumed for 7 days"
+          description: "{{ $labels.schemaname }}.{{ $labels.relname }} has over 100k dead rows and no autovacuum in 7 days (or never)."
+          runbook: "https://git.4sightdigi.com/CSE-TECH/FalconAI/src/branch/main/docs/db/scaling/p1-7c-alerts.md#postgresautovacuumstale"
+
+      - alert: PostgresDeadlocks
+        expr: increase(pg_stat_database_deadlocks[10m]) > 0
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Deadlocks in {{ $labels.datname }}"
+          description: "{{ $value | humanize }} deadlock(s) in the last 10 minutes."
+          runbook: "https://git.4sightdigi.com/CSE-TECH/FalconAI/src/branch/main/docs/db/scaling/p1-7c-alerts.md#postgresdeadlocks"
+
+      - alert: PostgresCacheHitLow
+        expr: >-
+          sum by (datname) (rate(pg_stat_database_blks_hit{datname!~"template0|template1|postgres"}[10m]))
+          / (sum by (datname) (rate(pg_stat_database_blks_hit{datname!~"template0|template1|postgres"}[10m]))
+             + sum by (datname) (rate(pg_stat_database_blks_read{datname!~"template0|template1|postgres"}[10m]))) < 0.95
+          and (sum by (datname) (rate(pg_stat_database_blks_hit{datname!~"template0|template1|postgres"}[10m]))
+               + sum by (datname) (rate(pg_stat_database_blks_read{datname!~"template0|template1|postgres"}[10m]))) > 100
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: "PostgreSQL cache hit ratio below 95%"
+          description: "Cache hit ratio for {{ $labels.datname }} is {{ $value | humanizePercentage }} for 30 minutes (reads are going to disk)."
+          runbook: "https://git.4sightdigi.com/CSE-TECH/FalconAI/src/branch/main/docs/db/scaling/p1-7c-alerts.md#postgrescachehitlow"

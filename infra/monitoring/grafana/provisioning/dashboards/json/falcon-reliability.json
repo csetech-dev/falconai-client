@@ -1,0 +1,292 @@
+{
+  "title": "FalconAI Reliability",
+  "uid": "falcon-reliability",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "15s",
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "HTTP p95 by route (seconds)",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum by (le, service, route) (rate(falcon_http_request_duration_seconds_bucket[5m])))",
+          "legendFormat": "{{service}} {{route}} {{kind}}"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "HTTP p99 by route (seconds)",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 0,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.99, sum by (le, service, route) (rate(falcon_http_request_duration_seconds_bucket[5m])))",
+          "legendFormat": "{{service}} {{route}} {{kind}}"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "HTTP 5xx fraction",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 8,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (service) (rate(falcon_http_request_duration_seconds_count{status=~\"5..\"}[5m])) / sum by (service) (rate(falcon_http_request_duration_seconds_count[5m]))",
+          "legendFormat": "{{service}} {{route}} {{kind}}"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Request rate",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 8,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (service) (rate(falcon_http_request_duration_seconds_count[5m]))",
+          "legendFormat": "{{service}} {{route}} {{kind}}"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "Database operation / execution p95",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 16,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum by (le, kind) (rate(falcon_database_duration_seconds_bucket[5m])))",
+          "legendFormat": "{{service}} {{route}} {{kind}}"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "title": "Database pool timeouts",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 16,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(falcon_database_pool_timeouts_total[5m]))",
+          "legendFormat": "{{service}} {{route}} {{kind}}"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "title": "Process resident memory",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 24,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "falcon_process_resident_memory_bytes",
+          "legendFormat": "{{service}} {{route}} {{kind}}"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "title": "Event loop p99 seconds",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 24,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "falcon_event_loop_delay_p99_seconds",
+          "legendFormat": "{{service}} {{route}} {{kind}}"
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "title": "Process CPU cores",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 32,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "rate(falcon_process_cpu_seconds_total[5m])",
+          "legendFormat": "{{service}} {{route}} {{kind}}"
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "title": "Scrape availability",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 32,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "up{job=~\"falcon-core|falcon-search\"}",
+          "legendFormat": "{{service}} {{route}} {{kind}}"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "id": 11,
+      "title": "Search availability (30s probe)",
+      "gridPos": {
+        "x": 0,
+        "y": 40,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "falcon_search_available",
+          "legendFormat": "{{feed}}"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "id": 12,
+      "title": "Indexed cursor age (not ingestion lag)",
+      "gridPos": {
+        "x": 12,
+        "y": 40,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "time() - falcon_search_cursor_timestamp_seconds",
+          "legendFormat": "{{feed}}"
+        }
+      ]
+    }
+  ],
+  "templating": {
+    "list": [
+      {
+        "name": "DS_PROMETHEUS",
+        "label": "Prometheus",
+        "type": "datasource",
+        "query": "prometheus",
+        "current": {
+          "text": "Prometheus",
+          "value": "falcon-prometheus"
+        },
+        "hide": 2
+      }
+    ]
+  }
+}

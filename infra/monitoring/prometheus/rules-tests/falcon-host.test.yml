@@ -1,0 +1,70 @@
+# promtool unit tests for rules/falcon-host.yml (scaling plan P1.7c). Each alert: fires + stays quiet.
+rule_files:
+  - ../rules/falcon-host.yml
+evaluation_interval: 1m
+tests:
+  - interval: 1m
+    input_series:
+      - series: 'up{instance="s:9187",job="postgres"}'
+        values: '0x10'
+      - series: 'node_filesystem_avail_bytes{device="/dev/mapper/vg-lv",fstype="ext4",instance="s:9100",job="node-storage",mountpoint="/"}'
+        values: '25x20'
+      - series: 'node_filesystem_size_bytes{device="/dev/mapper/vg-lv",fstype="ext4",instance="s:9100",job="node-storage",mountpoint="/"}'
+        values: '100x20'
+      - series: 'node_memory_MemAvailable_bytes{instance="s:9100",job="node-storage"}'
+        values: '5x20'
+      - series: 'node_memory_MemTotal_bytes{instance="s:9100",job="node-storage"}'
+        values: '100x20'
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: MonitoringTargetDown
+        exp_alerts:
+          - exp_labels: {severity: critical, instance: "s:9187", job: postgres}
+            exp_annotations: {summary: "Monitoring target postgres is down", description: "Prometheus cannot scrape postgres (s:9187) for 5 minutes.", runbook: "https://git.4sightdigi.com/CSE-TECH/FalconAI/src/branch/main/docs/db/scaling/p1-7c-alerts.md#monitoringtargetdown"}
+      - eval_time: 16m
+        alertname: StorageDiskFillingWarning
+        exp_alerts:
+          - exp_labels: {severity: warning, device: /dev/mapper/vg-lv, fstype: ext4, instance: "s:9100", job: node-storage, mountpoint: /}
+            exp_annotations: {summary: "Storage server disk over 70% used", description: "/ on the storage server is 75% used.", runbook: "https://git.4sightdigi.com/CSE-TECH/FalconAI/src/branch/main/docs/db/scaling/p1-7c-alerts.md#storagediskfilling"}
+      - {eval_time: 16m, alertname: StorageDiskFillingCritical, exp_alerts: []}
+      - eval_time: 11m
+        alertname: StorageMemoryLow
+        exp_alerts:
+          - exp_labels: {severity: warning, instance: "s:9100", job: node-storage}
+            exp_annotations: {summary: "Storage server memory below 10% available", description: "Only 5% of memory available on the storage server for 10 minutes.", runbook: "https://git.4sightdigi.com/CSE-TECH/FalconAI/src/branch/main/docs/db/scaling/p1-7c-alerts.md#storagememorylow"}
+
+  - interval: 1m
+    input_series:
+      - series: 'node_filesystem_avail_bytes{device="/dev/mapper/vg-lv",fstype="ext4",instance="s:9100",job="node-storage",mountpoint="/"}'
+        values: '10x20'
+      - series: 'node_filesystem_size_bytes{device="/dev/mapper/vg-lv",fstype="ext4",instance="s:9100",job="node-storage",mountpoint="/"}'
+        values: '100x20'
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: StorageDiskFillingCritical
+        exp_alerts:
+          - exp_labels: {severity: critical, device: /dev/mapper/vg-lv, fstype: ext4, instance: "s:9100", job: node-storage, mountpoint: /}
+            exp_annotations: {summary: "Storage server disk over 85% used", description: "/ on the storage server is 90% used. Postgres stops when the disk is full.", runbook: "https://git.4sightdigi.com/CSE-TECH/FalconAI/src/branch/main/docs/db/scaling/p1-7c-alerts.md#storagediskfilling"}
+
+  # Quiet: everything up, disk 32% used (stage after the resize), memory fine, another mountpoint full.
+  - interval: 1m
+    input_series:
+      - series: 'up{instance="s:9187",job="postgres"}'
+        values: '1x10'
+      - series: 'node_filesystem_avail_bytes{device="/dev/mapper/vg-lv",fstype="ext4",instance="s:9100",job="node-storage",mountpoint="/"}'
+        values: '68x20'
+      - series: 'node_filesystem_size_bytes{device="/dev/mapper/vg-lv",fstype="ext4",instance="s:9100",job="node-storage",mountpoint="/"}'
+        values: '100x20'
+      - series: 'node_filesystem_avail_bytes{device="/dev/sda2",fstype="ext4",instance="s:9100",job="node-storage",mountpoint="/boot"}'
+        values: '1x20'
+      - series: 'node_filesystem_size_bytes{device="/dev/sda2",fstype="ext4",instance="s:9100",job="node-storage",mountpoint="/boot"}'
+        values: '100x20'
+      - series: 'node_memory_MemAvailable_bytes{instance="s:9100",job="node-storage"}'
+        values: '50x20'
+      - series: 'node_memory_MemTotal_bytes{instance="s:9100",job="node-storage"}'
+        values: '100x20'
+    alert_rule_test:
+      - {eval_time: 6m, alertname: MonitoringTargetDown, exp_alerts: []}
+      - {eval_time: 16m, alertname: StorageDiskFillingWarning, exp_alerts: []}
+      - {eval_time: 16m, alertname: StorageDiskFillingCritical, exp_alerts: []}
+      - {eval_time: 11m, alertname: StorageMemoryLow, exp_alerts: []}

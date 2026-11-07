@@ -25,6 +25,7 @@ services:
     volumes:
     - ${MONITORING_CONFIG_DIR:-/etc/falcon-monitoring/config}:/etc/falcon-config:ro
     - ${MONITORING_SECRETS_DIR:-/etc/falcon-monitoring/secrets}:/run/falcon-secrets:ro
+    - ./infra/monitoring/prometheus/rules:/etc/prometheus/rules:ro
     - prometheus_data:/prometheus
     deploy:
       resources:
