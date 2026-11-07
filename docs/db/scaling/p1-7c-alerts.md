@@ -41,8 +41,8 @@ More than 80% of `max_connections` has been in use for 10 minutes. New connectio
 
 A transaction has been running, or idle inside a transaction, for more than 5 minutes. It blocks VACUUM and can hold locks.
 
-It can also be harmless. A long **autovacuum** on a big table, or a manual `pg_dump` / `scripts/dump-db.sh`, shows up as a long
-transaction too.
+Only application connections count (`backend_type="client backend"`); autovacuum and other background workers never trigger it. A
+manual `pg_dump` / `scripts/dump-db.sh` is a client connection, so a long dump does trigger it, and that's harmless.
 
 1. Find it (read-only):
 

@@ -352,7 +352,7 @@
         "type": "prometheus",
         "uid": "falcon-prometheus"
       },
-      "description": "Alert PostgresLongTransaction above 5 minutes",
+      "description": "Alert PostgresLongTransaction above 5 minutes counts client backends only (autovacuum shown, never alerted)",
       "gridPos": {
         "x": 12,
         "y": 20,
@@ -366,8 +366,8 @@
             "type": "prometheus",
             "uid": "falcon-prometheus"
           },
-          "expr": "max by (state) (pg_stat_activity_max_tx_duration)",
-          "legendFormat": "{{state}}"
+          "expr": "max by (backend_type, state) (pg_stat_activity_max_tx_duration)",
+          "legendFormat": "{{backend_type}} · {{state}}"
         }
       ],
       "fieldConfig": {

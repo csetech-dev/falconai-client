@@ -11,7 +11,7 @@ tests:
         values: '90x20'
       - series: 'pg_settings_max_connections{instance="s:9187",job="postgres"}'
         values: '100x20'
-      - series: 'pg_stat_activity_max_tx_duration{datname="falcon_ai",state="idle in transaction",instance="s:9187",job="postgres"}'
+      - series: 'pg_stat_activity_max_tx_duration{backend_type="client backend",datname="falcon_ai",state="idle in transaction",instance="s:9187",job="postgres"}'
         values: '400x10'
       - series: 'pg_stat_database_deadlocks{datname="falcon_ai",instance="s:9187",job="postgres"}'
         values: '0 0 0 1 1 1 1 1'
@@ -45,9 +45,9 @@ tests:
         values: '50x20'
       - series: 'pg_settings_max_connections{instance="s:9187",job="postgres"}'
         values: '100x20'
-      - series: 'pg_stat_activity_max_tx_duration{datname="falcon_ai",state="active",instance="s:9187",job="postgres"}'
+      - series: 'pg_stat_activity_max_tx_duration{backend_type="client backend",datname="falcon_ai",state="active",instance="s:9187",job="postgres"}'
         values: '100x10'
-      - series: 'pg_stat_activity_max_tx_duration{datname="falcon_ai",state="idle",instance="s:9187",job="postgres"}'
+      - series: 'pg_stat_activity_max_tx_duration{backend_type="client backend",datname="falcon_ai",state="idle",instance="s:9187",job="postgres"}'
         values: '9999x10'
       - series: 'pg_stat_database_deadlocks{datname="falcon_ai",instance="s:9187",job="postgres"}'
         values: '3x10'
@@ -121,7 +121,7 @@ tests:
   # Aborted idle-in-transaction also holds locks and blocks vacuum: it must fire too.
   - interval: 1m
     input_series:
-      - series: 'pg_stat_activity_max_tx_duration{datname="falcon_ai",state="idle in transaction (aborted)",instance="s:9187",job="postgres"}'
+      - series: 'pg_stat_activity_max_tx_duration{backend_type="client backend",datname="falcon_ai",state="idle in transaction (aborted)",instance="s:9187",job="postgres"}'
         values: '400x10'
     alert_rule_test:
       - eval_time: 3m
@@ -139,3 +139,13 @@ tests:
         values: '0+5x40'
     alert_rule_test:
       - {eval_time: 35m, alertname: PostgresCacheHitLow, exp_alerts: []}
+
+  # Autovacuum workers (and other background processes) run long on big tables: never a "long transaction" alert.
+  - interval: 1m
+    input_series:
+      - series: 'pg_stat_activity_max_tx_duration{backend_type="autovacuum worker",datname="falcon_ai",state="active",instance="s:9187",job="postgres"}'
+        values: '900x10'
+      - series: 'pg_stat_activity_max_tx_duration{backend_type="background worker",datname="falcon_ai",state="active",instance="s:9187",job="postgres"}'
+        values: '900x10'
+    alert_rule_test:
+      - {eval_time: 3m, alertname: PostgresLongTransaction, exp_alerts: []}

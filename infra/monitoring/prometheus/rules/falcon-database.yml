@@ -24,7 +24,7 @@ groups:
           runbook: "https://git.4sightdigi.com/CSE-TECH/FalconAI/src/branch/main/docs/db/scaling/p1-7c-alerts.md#postgresconnectionshigh"
 
       - alert: PostgresLongTransaction
-        expr: max by (datname, state) (pg_stat_activity_max_tx_duration{state=~"active|idle in transaction.*"}) > 300
+        expr: max by (datname, state) (pg_stat_activity_max_tx_duration{backend_type="client backend",state=~"active|idle in transaction.*"}) > 300
         for: 2m
         labels:
           severity: warning
