@@ -1,10 +1,16 @@
 .PHONY: init-storage init-app init-brain deploy-storage deploy-app deploy-brain deploy-ghcr deploy-ghcr-nosync deploy-status deploy-down fix-crlf fix-worker-entrypoints verify-scrapers sizing-check nginx-check clean-docker setup-auto-deploy logs-app logs-storage \
 	db-push db-push-loss db-generate db-seed db-seed-prompts db-seed-news-prompts db-seed-news-sources db-seed-international-keywords db-seed-international-news-source db-seed-videos db-seed-epaper-sources db-status db-psql \
 	db-exec-push db-exec-push-loss db-exec-generate db-exec-seed db-exec-seed-prompts db-exec-seed-news-prompts db-exec-seed-news-sources db-exec-seed-international-keywords db-exec-seed-international-news-source db-exec-seed-epaper-sources db-exec-seed-videos db-exec-seed-twitter-profiles db-exec-seed-telegram-profiles db-copy-schema \
-	dump-db help
+	dump-db abir-up abir-down abir-ps abir-logs help
 
 help:
 	@echo "FalconAI split deployment (any host — pick the stack you need)"
+	@echo ""
+	@echo "  Abir local Docker (docker-compose.abir.yml — build + all services):"
+	@echo "    make abir-up          Build and start full Abir stack"
+	@echo "    make abir-down        Stop and remove Abir stack"
+	@echo "    make abir-ps          Show Abir container status"
+	@echo "    make abir-logs        Follow Abir logs (SVC=name optional)"
 	@echo ""
 	@echo "  Storage stack (Postgres + MinIO):"
 	@echo "    make init-storage     Create .env.storage"
@@ -208,3 +214,16 @@ db-exec-seed-telegram-profiles:
 
 dump-db:
 	bash scripts/dump-db.sh
+
+# ── Abir local full stack (docker-compose.abir.yml) ──────────────────────────
+abir-up:
+	bash scripts/abir-up.sh
+
+abir-down:
+	bash scripts/abir-down.sh
+
+abir-ps:
+	docker compose -f docker-compose.abir.yml --profile full ps
+
+abir-logs:
+	docker compose -f docker-compose.abir.yml --profile full logs -f $(SVC)
