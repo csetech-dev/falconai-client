@@ -39,8 +39,14 @@ msl_valid_ipv4() {
 
 msl_confirm() {  # msl_confirm <question>
   [[ "$MSL_ASSUME_YES" -eq 1 ]] && return 0
+  # The answer is read from the terminal itself, so a piped stdin can't answer by accident. Some sessions
+  # (web consoles, remote exec) have no terminal: say so instead of looking like a "no".
+  if ! { exec 9</dev/tty; } 2>/dev/null; then
+    msl_fail "$MSL_EXIT_PREFLIGHT" "cannot ask for confirmation: this session has no terminal. Nothing changed. Check the plan with --dry-run, then run the same command again with --yes"
+  fi
   local answer=""
-  read -r -p "$1 [y/N] " answer < /dev/tty || true
+  read -r -p "$1 [y/N] " answer <&9 || true
+  exec 9<&-
   [[ "$answer" == y || "$answer" == Y || "$answer" == yes ]] || msl_fail "$MSL_EXIT_PREFLIGHT" "cancelled, nothing changed"
 }
 
