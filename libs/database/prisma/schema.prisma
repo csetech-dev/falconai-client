@@ -1509,6 +1509,8 @@ model CaseFiling {
   lastRunAt       DateTime?
   nextRunAt       DateTime?
   lastError       String?  @db.Text
+  /// User drag-order on the case drive; lower = earlier in "My order".
+  sortOrder       Int      @default(0)
   createdBy       String
   deletedAt       DateTime?
   deletedBy       String?
@@ -1521,6 +1523,7 @@ model CaseFiling {
 
   @@index([userId, status])
   @@index([userId, deletedAt, updatedAt])
+  @@index([userId, sortOrder])
   @@index([deletedAt])
   @@index([status, nextRunAt])
   @@index([endAt])
@@ -1844,6 +1847,11 @@ model NewsArticle {
   @@index([districtId, sourceId, scrapedAt])
   @@index([status, mediaId, publishedAt])
   @@index([status, sourceId, publishedAt])
+  // Source page sentiment view (getSourceSentimentSummary / getSourceSentimentArticles): status + source +
+  // sentiment label + publishedAt, so the per-source counts can be answered from the index and the
+  // sentiment list is one bounded range scan. Built CONCURRENTLY by scripts/performance/
+  // apply-performance-schema.sql under this same name, so `db push` finds nothing to add.
+  @@index([status, sourceId, latestSentimentLabel, publishedAt], map: "news_articles_status_source_sentiment_published_idx")
   @@index([status, keywordCategoryId, publishedAt])
   // Dashboard/news analytics (getDynamicAnalytics in news-dashboard.service.ts)
   // filters on status + (mediaId OR sourceId) + keywordCategoryId + publishedAt

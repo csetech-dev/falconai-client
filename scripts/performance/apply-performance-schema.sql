@@ -82,6 +82,14 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS "news_articles_category_trgm_idx" ON "ne
 CREATE INDEX CONCURRENTLY IF NOT EXISTS "news_articles_status_published_desc_nl_idx"
     ON "news_articles" ("status", "publishedAt" DESC NULLS LAST, "id" DESC);
 
+-- Source page sentiment view (news.service getSourceSentimentSummary / getSourceSentimentArticles).
+-- Filters GOOD articles of one source by sentiment label inside a time window and pages them newest-first
+-- by keyset. Declared in schema.prisma under the same name, so `db push` adds nothing; building it here
+-- CONCURRENTLY keeps writes to news_articles flowing while it is built. Additive: older app versions
+-- are unaffected. One more index to maintain on insert and on every latestSentimentLabel update.
+CREATE INDEX CONCURRENTLY IF NOT EXISTS "news_articles_status_source_sentiment_published_idx"
+    ON "news_articles" ("status", "sourceId", "latestSentimentLabel", "publishedAt");
+
 -- News text search (perf/news-search-progressive, beta 2026-09-30).
 -- news_articles.search_tsv is abandoned (100 % NULL on beta; its trigger and
 -- helpers were never kept in the repo), and ILIKE over article bodies is not
