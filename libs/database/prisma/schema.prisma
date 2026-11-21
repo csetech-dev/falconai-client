@@ -1520,6 +1520,12 @@ model CaseFiling {
 
   runs     CaseFilingRun[]
   analyses CaseFilingAnalysis[]
+  /// The permanent evidence store and case file (see docs/superpowers/specs/2026-11-21-case-evidence-ledger-design.md).
+  evidenceItems CaseFilingEvidence[]
+  folders       CaseFilingFolder[]
+  issues        CaseFilingIssue[]
+  /// Set when this case's past sweeps and case file were loaded into the store; until then the legacy view is used.
+  ledgerBackfilledAt DateTime?
 
   @@index([userId, status])
   @@index([userId, deletedAt, updatedAt])
@@ -1544,6 +1550,8 @@ model CaseFilingRun {
   resultCount     Int         @default(0)
   payload         Json?
   result          Json?
+  /// When this sweep's result was loaded into the evidence store; null = still to load (a catch-up pass retries).
+  ledgerIngestedAt DateTime?
   captchaRequired Boolean     @default(false)
   captchaViewerUrl String?
   captchaSegment  String?
@@ -1587,8 +1595,114 @@ model CaseFilingAnalysis {
   finishedAt       DateTime?
 
   @@index([caseId, startedAt])
+  // The hourly cap counts passes started in the last hour, across all cases.
+  @@index([startedAt])
   @@index([status, startedAt])
   @@map("case_filing_analyses")
+}
+
+/// One row per distinct item a case has collected, kept for the life of the case.
+model CaseFilingEvidence {
+  id                   String     @id @default(cuid())
+  caseId               String
+  case                 CaseFiling @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  /// Dedupe key: u:<url>, else i:<source id>, else t:<title>|<source>.
+  identity             String
+  channels             String[]
+  platforms            String[]
+  title                String     @db.Text
+  text                 String     @db.Text
+  source               String     @default("")
+  author               String     @default("")
+  url                  String?    @db.Text
+  sourceId             String?
+  image                String?    @db.Text
+  logo                 String?    @db.Text
+  matchedKeywords      String[]
+  /// The site's own time text, kept as is.
+  publishedText        String     @default("")
+  publishedAt          DateTime?
+  /// exact | relative | unknown
+  publishedAtBasis     String     @default("unknown")
+  firstCollectedAt     DateTime
+  lastCollectedAt      DateTime
+  firstRunId           String?
+  lastRunId            String?
+  seenRunIds           String[]
+  seenCount            Int        @default(1)
+  /// The original row as the sweep stored it.
+  raw                  Json?
+  /// PENDING | FILED | NOT_FILED
+  review               String     @default("PENDING")
+  reviewedAt           DateTime?
+  reviewedByAnalysisId String?
+  reviewedByUserId     String?
+  createdAt            DateTime   @default(now())
+  updatedAt            DateTime   @updatedAt
+  citations            CaseFilingIssueEvidence[]
+
+  @@unique([caseId, identity])
+  @@index([caseId, review])
+  @@index([caseId, publishedAt])
+  @@index([caseId, firstCollectedAt])
+  @@map("case_filing_evidence")
+}
+
+/// A folder of the permanent case file. `shortId` is the F<n> the AI prompt uses.
+model CaseFilingFolder {
+  id        String     @id @default(cuid())
+  caseId    String
+  case      CaseFiling @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  shortId   Int
+  name      String     @db.Text
+  about     String     @default("") @db.Text
+  position  Int        @default(0)
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+  issues    CaseFilingIssue[]
+
+  @@unique([caseId, shortId])
+  @@map("case_filing_folders")
+}
+
+/// An issue of the permanent case file. `shortId` is the I<n> the AI prompt uses. Never deleted by the AI.
+model CaseFilingIssue {
+  id                  String           @id @default(cuid())
+  caseId              String
+  case                CaseFiling       @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  folderId            String
+  folder              CaseFilingFolder @relation(fields: [folderId], references: [id], onDelete: Cascade)
+  shortId             Int
+  title               String           @db.Text
+  summary             String           @default("") @db.Text
+  /// HIGH | MEDIUM | LOW
+  importance          String           @default("MEDIUM")
+  position            Int              @default(0)
+  createdByAnalysisId String?
+  updatedByAnalysisId String?
+  createdAt           DateTime         @default(now())
+  updatedAt           DateTime         @updatedAt
+  citations           CaseFilingIssueEvidence[]
+
+  @@unique([caseId, shortId])
+  @@index([folderId])
+  @@map("case_filing_issues")
+}
+
+/// An issue cites an item. Added by an AI pass (analysisId) or an analyst (userId).
+model CaseFilingIssueEvidence {
+  id         String             @id @default(cuid())
+  issueId    String
+  issue      CaseFilingIssue    @relation(fields: [issueId], references: [id], onDelete: Cascade)
+  evidenceId String
+  evidence   CaseFilingEvidence @relation(fields: [evidenceId], references: [id], onDelete: Cascade)
+  analysisId String?
+  userId     String?
+  createdAt  DateTime           @default(now())
+
+  @@unique([issueId, evidenceId])
+  @@index([evidenceId])
+  @@map("case_filing_issue_evidence")
 }
 
 model CampaignKeyword {
