@@ -141,6 +141,7 @@ enum ProfileType {
   BRAND
   MEDIA
   GOVERNMENT
+  AUTHOR
   OTHER
 }
 
